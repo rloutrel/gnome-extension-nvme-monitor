@@ -1,0 +1,9 @@
+{
+  "name": "NVMe Monitor",
+  "description": "Monitors NVMe device status, temperature, performance metrics, and provides interactive notifications for storage health monitoring",
+  "shell-version": ["50"],
+  "uuid": "nvme-monitor@rloutrel.github.com",
+  "version": "1.0",
+  "developer": "Romain Loutrel",
+  "url": "https://github.com/rloutrel/gnome-extension-nvme-monitor"
+}
