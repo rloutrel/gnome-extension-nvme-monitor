@@ -13,6 +13,14 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { parseSmart } from './smartParser.js';
 // Import temperature line formatting (pure, unit-tested)
 import { formatTemperatureLine, formatSensorRows } from './tempFormat.js';
+// Import nvme-cli version detection (pure, unit-tested)
+import {
+    parseNvmeVersion,
+    assessNvmeCliVersion,
+    FORMAT_CHANGE_ISSUE_URL,
+} from './versionUtils.js';
+// Import device-list normalization for both flat and nested JSON layouts (pure)
+import { normalizeDeviceList } from './deviceList.js';
 
 // ---------------------------------------------------------------------------
 // Unified logger + simple loop detector.
@@ -92,6 +100,38 @@ const ICONS = Object.freeze({
 function fileIcon(iconPath) {
     if (!GLib.file_test(iconPath, GLib.FileTest.EXISTS)) return null;
     return new Gio.FileIcon({ file: Gio.File.new_for_path(iconPath) });
+}
+
+// Detect the installed nvme-cli version once and warn the user if it is
+// affected by a known `nvme list -o json` software bug.  Called from
+// enable() after the binary is located.
+function _checkNvmeCliVersion(nvmeBin) {
+    if (!nvmeBin) {
+        _warn('nvme-cli not found; skipping version check');
+        return;
+    }
+
+    const result = runCommandSync([nvmeBin, 'version']);
+    if (!result.ok || result.exitCode !== 0) {
+        _warn(`nvme version failed (exit ${result.exitCode})`);
+        return;
+    }
+
+    const version = parseNvmeVersion(result.stdout);
+    if (!version) {
+        _warn(`nvme version: unparseable output: ${result.stdout?.trim() || '(empty)'}`);
+        return;
+    }
+
+    _debug(`nvme-cli version: ${version.join('.')}`);
+
+    const assessment = assessNvmeCliVersion(version);
+    if (assessment.affected) {
+        const versionStr = version.join('.');
+        const detail = assessment.reasons.join(' ');
+        const body = `${_('nvme-cli compatibility warning')} (v${versionStr}): ${detail}`;
+        notifyError(_('NVMe Monitor'), `${body}\n${FORMAT_CHANGE_ISSUE_URL}`);
+    }
 }
 
 function isV2Installed() {
@@ -285,7 +325,7 @@ const Indicator = GObject.registerClass(
 
             try {
                 const parsed = JSON.parse(listResult.stdout);
-                this._cachedDevices = parsed.Devices || [];
+                this._cachedDevices = normalizeDeviceList(parsed);
                 _debug(`nvme list: found ${this._cachedDevices.length} devices (cached)`);
                 return this._cachedDevices;
             } catch (e) {
@@ -690,6 +730,8 @@ export default class IndicatorExampleExtension extends Extension {
         this._indicator._extensionPath = this.path;
         this._indicator._setupIcon();
         this._indicator._checkSetupScript();
+        // Detect the installed nvme-cli version once and warn if affected.
+        _checkNvmeCliVersion(GLib.find_program_in_path('nvme'));
         // Start polling if the polkit stack is already installed.
         if (isV2Installed()) {
             this._indicator._startPolling();
