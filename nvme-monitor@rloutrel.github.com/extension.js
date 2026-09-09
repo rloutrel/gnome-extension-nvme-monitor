@@ -409,6 +409,30 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
+        // Load a bundled icon by name from icons/bootstrap/ as a GIcon.
+        // Returns a cached Gio.FileIcon, or null if the file is missing.
+        // `iconName` is the bare icon name (no extension), e.g.
+        // 'thermometer-low', resolved to icons/bootstrap/thermometer-low.svg.
+        // -------------------------------------------------------------------
+        _loadIconByName(iconName) {
+            if (!iconName) return null;
+            if (this._iconCache === undefined) this._iconCache = {};
+            if (iconName in this._iconCache) return this._iconCache[iconName];
+
+            const iconPath = GLib.build_filenamev([
+                this._extensionPath || '', 'icons', 'bootstrap', `${iconName}.svg`,
+            ]);
+            if (!GLib.file_test(iconPath, GLib.FileTest.EXISTS)) {
+                _log(`icon not found: ${iconPath}`);
+                this._iconCache[iconName] = null;
+                return null;
+            }
+            const gicon = new Gio.FileIcon({ file: Gio.File.new_for_path(iconPath) });
+            this._iconCache[iconName] = gicon;
+            return gicon;
+        }
+
+        // -------------------------------------------------------------------
         // Add a non-interactive info line with optional icon.
         // -------------------------------------------------------------------
         _addInfoLine(text, styleClass = '', iconName = null) {
@@ -419,11 +443,17 @@ const Indicator = GObject.registerClass(
             }
             // Prepend icon if provided
             if (iconName) {
-                const icon = new St.Icon({
-                    icon_name: iconName,
+                const gicon = this._loadIconByName(iconName);
+                const iconProps = {
                     icon_size: 16,
                     style_class: 'nvme-info-icon',
-                });
+                };
+                if (gicon) {
+                    iconProps.gicon = gicon;
+                } else {
+                    iconProps.icon_name = iconName;
+                }
+                const icon = new St.Icon(iconProps);
                 // Insert icon at the beginning of the item's children
                 const children = item.get_children();
                 if (children.length > 0) {
