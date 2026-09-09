@@ -2,3 +2,4 @@
 - config
 - pin information on the taskbar (like temperature: click add/remove, in the click order)
 - customise device names by the user
+- be more explicit/explain the reason for the pkexec installation
