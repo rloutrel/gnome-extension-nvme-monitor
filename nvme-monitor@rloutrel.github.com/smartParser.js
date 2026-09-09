@@ -151,8 +151,8 @@ export class BaseParser {
      */
     _parseHealth() {
         return {
-            availableSparePercent: this.raw.available_spare,
-            percentageUsed: this.raw.percentage_used,
+            availableSparePercent: this.raw.avail_spare,
+            percentageUsed: this.raw.percent_used,
         };
     }
 
@@ -246,12 +246,12 @@ export class SamsungParser extends BaseParser {
      */
     _parseEndurance() {
         const base = super._parseEndurance();
-        // Samsung may report host_reads, host_writes, etc.
-        if (this.raw.host_reads !== undefined) {
-            base.hostReads = this.raw.host_reads;
+        // NVMe SMART reports host_read_commands / host_write_commands.
+        if (this.raw.host_read_commands !== undefined) {
+            base.hostReads = this.raw.host_read_commands;
         }
-        if (this.raw.host_writes !== undefined) {
-            base.hostWrites = this.raw.host_writes;
+        if (this.raw.host_write_commands !== undefined) {
+            base.hostWrites = this.raw.host_write_commands;
         }
         return base;
     }
