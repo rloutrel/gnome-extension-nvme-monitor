@@ -11,7 +11,7 @@
  *   const parsed = parser.parse();
  */
 
-import GLib from 'gi://GLib';
+// Pure module: no GJS imports, so it can be unit-tested with Node.
 
 // ---------------------------------------------------------------------------
 // Base Parser: Standard NVMe SMART fields (NVMe Specification)
@@ -84,17 +84,20 @@ import GLib from 'gi://GLib';
 export class BaseParser {
     /**
      * @param {Object} raw - Raw SMART JSON from nvme smart-log
+     * @param {string} [modelHint] - Device model name (from nvme list) for
+     *   manufacturer detection, since the SMART log itself has no ModelNumber.
      */
-    constructor(raw) {
+    constructor(raw, modelHint = null) {
         this.raw = raw;
+        this._modelHint = modelHint;
     }
 
     /**
      * Detect manufacturer from ModelNumber or SerialNumber prefix.
      * @returns {string} Manufacturer name (normalized)
      */
-    _detectManufacturer() {
-        const model = this.raw?.ModelNumber || '';
+    _detectManufacturer(modelHint = null) {
+        const model = modelHint || this._modelHint || this.raw?.ModelNumber || '';
         const serial = this.raw?.SerialNumber || '';
 
         if (model.includes('Samsung') || serial.startsWith('S')) {
@@ -127,10 +130,10 @@ export class BaseParser {
         if (kelvin === undefined || kelvin === null) return null;
         // If value looks like Kelvin (> 200K = -73°C), convert
         if (kelvin > 200) {
-            return Math.round(kelvin - 273.15);
+            return Math.round((kelvin - 273.15) * 10) / 10;
         }
         // Already in Celsius
-        return Math.round(kelvin);
+        return Math.round(kelvin * 10) / 10;
     }
 
     /**
@@ -151,8 +154,8 @@ export class BaseParser {
      */
     _parseHealth() {
         return {
-            availableSparePercent: this.raw.available_spare,
-            percentageUsed: this.raw.percentage_used,
+            availableSparePercent: this.raw.avail_spare,
+            percentageUsed: this.raw.percent_used,
         };
     }
 
@@ -246,12 +249,12 @@ export class SamsungParser extends BaseParser {
      */
     _parseEndurance() {
         const base = super._parseEndurance();
-        // Samsung may report host_reads, host_writes, etc.
-        if (this.raw.host_reads !== undefined) {
-            base.hostReads = this.raw.host_reads;
+        // NVMe SMART reports host_read_commands / host_write_commands.
+        if (this.raw.host_read_commands !== undefined) {
+            base.hostReads = this.raw.host_read_commands;
         }
-        if (this.raw.host_writes !== undefined) {
-            base.hostWrites = this.raw.host_writes;
+        if (this.raw.host_write_commands !== undefined) {
+            base.hostWrites = this.raw.host_write_commands;
         }
         return base;
     }
@@ -338,7 +341,7 @@ export class IntelParser extends BaseParser {
  * @param {string} [manufacturer] - Optional manufacturer override
  * @returns {BaseParser} Parser instance
  */
-export function getParser(raw, manufacturer = null) {
+export function getParser(raw, manufacturer = null, modelHint = null) {
     if (manufacturer) {
         switch (manufacturer.toLowerCase()) {
             case 'samsung':
@@ -360,25 +363,25 @@ export function getParser(raw, manufacturer = null) {
         }
     }
 
-    // Auto-detect from raw data
-    const detected = new BaseParser(raw)._detectManufacturer();
+    // Auto-detect from the model hint (device list) or raw data
+    const detected = new BaseParser(raw, modelHint)._detectManufacturer();
     switch (detected.toLowerCase()) {
         case 'samsung':
-            return new SamsungParser(raw);
+            return new SamsungParser(raw, modelHint);
         case 'wd':
         case 'western digital':
-            return new WDParser(raw);
+            return new WDParser(raw, modelHint);
         case 'micron':
-            return new MicronParser(raw);
+            return new MicronParser(raw, modelHint);
         case 'crucial':
-            return new CrucialParser(raw);
+            return new CrucialParser(raw, modelHint);
         case 'sk hynix':
         case 'skhynix':
-            return new SKHynixParser(raw);
+            return new SKHynixParser(raw, modelHint);
         case 'intel':
-            return new IntelParser(raw);
+            return new IntelParser(raw, modelHint);
         default:
-            return new BaseParser(raw);
+            return new BaseParser(raw, modelHint);
     }
 }
 
@@ -387,6 +390,6 @@ export function getParser(raw, manufacturer = null) {
  * @param {Object} raw - Raw SMART JSON from nvme smart-log
  * @returns {ParsedSmartData}
  */
-export function parseSmart(raw) {
-    return getParser(raw).parse();
+export function parseSmart(raw, modelHint = null) {
+    return getParser(raw, null, modelHint).parse();
 }

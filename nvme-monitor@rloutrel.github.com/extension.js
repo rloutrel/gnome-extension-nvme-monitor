@@ -11,15 +11,22 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 // Import the SMART parser
 import { parseSmart } from './smartParser.js';
+// Import temperature line formatting (pure, unit-tested)
+import { formatTemperatureLine, formatSensorRows } from './tempFormat.js';
+// Import nvme-cli version detection (pure, unit-tested)
+import {
+    parseNvmeVersion,
+    assessNvmeCliVersion,
+    FORMAT_CHANGE_ISSUE_URL,
+} from './versionUtils.js';
+// Import device-list normalization for both flat and nested JSON layouts (pure)
+import { normalizeDeviceList } from './deviceList.js';
 
 // ---------------------------------------------------------------------------
 // Unified logger + simple loop detector.
 //
 
 const LOG_PREFIX = '[NVMe-monitor]';
-const LOOP_THRESHOLD = 20;          // max 20 log lines per second
-const LOOP_WINDOW_US = 1_000_000;   // 1 second in microseconds
-const LOOP_CONTEXT_LINES = 10;      // lines to dump when loop detected
 
 // Global fail counter — incremented each time "Uninstall script not found"
 // is reached.  When it reaches KILL_THRESHOLD, the extension disables itself
@@ -27,46 +34,32 @@ const LOOP_CONTEXT_LINES = 10;      // lines to dump when loop detected
 const KILL_THRESHOLD = 4;
 let _uninstallNotFoundCount = 0;
 
-const _logTimestamps = [];  // sliding window of timestamps (microseconds)
-const _logRecent = [];      // recent messages for context dump
-let _loopDetected = false;
-
-function _log(message) {
-    const text = `${LOG_PREFIX} ${message}`;
-    console.log(text);
-
-    if (_loopDetected) return;
-
-    const ts = GLib.get_monotonic_time(); // microseconds
-
-    // Sliding window: remove timestamps older than 1 second.
-    while (_logTimestamps.length > 0 && (ts - _logTimestamps[0]) > LOOP_WINDOW_US) {
-        _logTimestamps.shift();
-    }
-    _logTimestamps.push(ts);
-
-    // Keep recent messages for context.
-    _logRecent.push(message);
-    if (_logRecent.length > LOOP_CONTEXT_LINES) {
-        _logRecent.shift();
-    }
-
-    // Detect: too many calls in 1 second → loop.
-    if (_logTimestamps.length > LOOP_THRESHOLD) {
-        _loopDetected = true;
-        console.log(`${LOG_PREFIX} ⛔ LOOP DETECTED — ${_logTimestamps.length} log calls in 1 second.`);
-        console.log(`${LOG_PREFIX} ⛔ Last ${_logRecent.length} messages before detection:`);
-        for (let i = 0; i < _logRecent.length; i++) {
-            console.log(`${LOG_PREFIX} ⛔   [${i + 1}] ${_logRecent[i]}`);
-        }
-        Main.notify(`NVMe Monitor: boucle détectée — ${_logTimestamps.length} appels/seconde. Voir les logs.`);
-        return;
-    }
+// Logging helpers conforming to the GJS debugging guide:
+// https://gjs.guide/extensions/development/debugging.html#logging
+//   console.debug()  → dev-only info (GLib.LogLevelFlags.LEVEL_DEBUG)
+//   console.warn()   → unexpected errors, possible bugs (LEVEL_WARNING)
+//   console.error()  → programmer errors, failures (LEVEL_CRITICAL)
+function _debug(message) {
+    console.debug(`${LOG_PREFIX} ${message}`);
 }
 
-function logAndNotify(title, body) {
-    _log(`${title}${body ? ' — ' + body : ''}`);
-    Main.notify(title, body || '');
+function _warn(message) {
+    console.warn(`${LOG_PREFIX} ${message}`);
+}
+
+function _error(message) {
+    console.error(`${LOG_PREFIX} ${message}`);
+}
+
+function notify(title, body = '') {
+    if (body) _debug(`${title} — ${body}`);
+    else _debug(title);
+    Main.notify(title, body);
+}
+
+function notifyError(title, body = '') {
+    _warn(`${title}${body ? ' — ' + body : ''}`);
+    Main.notify(title, body);
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +68,71 @@ function logAndNotify(title, body) {
 const WRAPPER_PATH = '/usr/local/bin/nvme-smart-log-json';
 const UNINSTALL_PATH = '/usr/local/bin/nvme-smart-uninstall.sh';
 const SETUP_SCRIPT_NAME = 'setup-polkit.sh';
+
+const ICONS_DIR = 'icons';
+const ICONS_BOOTSTRAP = 'bootstrap';
+const ICON_EXTENSION = '.svg';
+
+// Temperature thresholds (°C) for the heuristic green/orange tiers.
+// The red tier is driven by the drive's own critical_warning signal, not a
+// guessed °C value (see CRITICAL_WARNING_TEMP). 70°C aligns with where most
+// consumer NVMe drives begin thermal throttling.
+const TEMP_WARM_C = 50;
+const TEMP_HOT_C = 70;
+
+// NVMe SMART critical_warning bitmap (Log Page 02h). Bit 1 signals the
+// controller's configured temperature threshold was exceeded — the
+// manufacturer-true over-temperature signal.
+const CRITICAL_WARNING_TEMP = 0x02;
+
+// Bundled SVG icons (shipped in icons/bootstrap/) referenced by bare name.
+// System fallback (not bundled) for the panel placeholder.
+const ICONS = Object.freeze({
+    NvmeDark: 'nvme-dark',
+    Nvme: 'nvme',
+    ThermometerLow: 'thermometer-low',
+    ThermometerHalf: 'thermometer-half',
+    ThermometerHigh: 'thermometer-high',
+    PanelFallback: 'drive-harddisk-symbolic',
+});
+
+// Build a Gio.FileIcon from an absolute path, or null if the file is missing.
+function fileIcon(iconPath) {
+    if (!GLib.file_test(iconPath, GLib.FileTest.EXISTS)) return null;
+    return new Gio.FileIcon({ file: Gio.File.new_for_path(iconPath) });
+}
+
+// Detect the installed nvme-cli version once and warn the user if it is
+// affected by a known `nvme list -o json` software bug.  Called from
+// enable() after the binary is located.
+function _checkNvmeCliVersion(nvmeBin) {
+    if (!nvmeBin) {
+        _warn('nvme-cli not found; skipping version check');
+        return;
+    }
+
+    const result = runCommandSync([nvmeBin, 'version']);
+    if (!result.ok || result.exitCode !== 0) {
+        _warn(`nvme version failed (exit ${result.exitCode})`);
+        return;
+    }
+
+    const version = parseNvmeVersion(result.stdout);
+    if (!version) {
+        _warn(`nvme version: unparseable output: ${result.stdout?.trim() || '(empty)'}`);
+        return;
+    }
+
+    _debug(`nvme-cli version: ${version.join('.')}`);
+
+    const assessment = assessNvmeCliVersion(version);
+    if (assessment.affected) {
+        const versionStr = version.join('.');
+        const detail = assessment.reasons.join(' ');
+        const body = `${_('nvme-cli compatibility warning')} (v${versionStr}): ${detail}`;
+        notifyError(_('NVMe Monitor'), `${body}\n${FORMAT_CHANGE_ISSUE_URL}`);
+    }
+}
 
 function isV2Installed() {
     return GLib.file_test(WRAPPER_PATH, GLib.FileTest.EXISTS);
@@ -131,56 +189,42 @@ const Indicator = GObject.registerClass(
         _init() {
             super._init(0.0, _('NVMe Monitor'));
 
-            // Panel icon — container for two icons side-by-side for comparison.
-            this._iconBox = new St.BoxLayout({ style_class: 'nvme-icon-compare' });
-            this._panelIconFill = new St.Icon({
-                icon_name: 'drive-harddisk-symbolic',
+            // Panel icon — single NVMe outline icon.
+            this._panelIcon = new St.Icon({
+                icon_name: ICONS.PanelFallback,
                 style_class: 'system-status-icon',
             });
-            this._panelIconOutline = new St.Icon({
-                icon_name: 'drive-harddisk-symbolic',
-                style_class: 'system-status-icon',
-            });
-            this._iconBox.add_child(this._panelIconFill);
-            this._iconBox.add_child(this._panelIconOutline);
-            this.add_child(this._iconBox);
+            this.add_child(this._panelIcon);
 
             // Cached device icon (loaded in _setupIcon)
             this._deviceIcon = null;
+            this._iconCache = {};
             // Cached NVMe device list (fetched once)
             this._cachedDevices = null;
 
             // ---------------------------------------------------------------
             // Menu structure:
+            //   [Service Setup toggle]
+            //   [separator]
             //   [device section]  ← dynamically rebuilt on menu open
-            //   [separator]
-            //   [NVMe Stack toggle]
-            //   [separator]
-            //   [Heartbeat toggle]
             // ---------------------------------------------------------------
-
-            // Device info section — cleared and rebuilt on each refresh.
-            this._devicesSection = new PopupMenuSection();
-            this.menu.addMenuItem(this._devicesSection);
-
-            this.menu.addMenuItem(new PopupSeparatorMenuItem());
 
             // ---------------------------------------------------------------
             // v2: NVMe Stack toggle (install/uninstall)
             // ---------------------------------------------------------------
             const v2Installed = isV2Installed();
-            _log(`init: isV2Installed=${v2Installed}`);
+            _debug(`init: isV2Installed=${v2Installed}`);
 
             this._v2Updating = false;
 
-            this._v2Toggle = new PopupSwitchMenuItem(_('NVMe Stack'), v2Installed);
+            this._v2Toggle = new PopupSwitchMenuItem(_('Service Setup'), v2Installed);
 
             // If the stack is NOT installed and setup-polkit.sh is missing,
             // the user cannot install — disable the toggle entirely.
             // (check deferred to _checkSetupScript() called from enable())
 
             this._v2ToggleHandlerId = this._v2Toggle.connect('toggled', (item, state) => {
-                _log(`toggled(state=${state}) _v2Updating=${this._v2Updating}`);
+                _debug(`toggled(state=${state}) _v2Updating=${this._v2Updating}`);
                 if (this._v2Updating) return;
                 this._v2Updating = true;
 
@@ -192,16 +236,11 @@ const Indicator = GObject.registerClass(
             });
             this.menu.addMenuItem(this._v2Toggle);
 
-            // Separator
             this.menu.addMenuItem(new PopupSeparatorMenuItem());
 
-            // Heartbeat toggle — OFF, disabled (debug placeholder)
-            this._heartbeatToggle = new PopupSwitchMenuItem(_('Heartbeat'), false);
-            this._heartbeatToggle.setSensitive(false);
-            this._heartbeatToggle.connect('toggled', (item, state) => {
-                _log(`Heartbeat toggled: ${state}`);
-            });
-            this.menu.addMenuItem(this._heartbeatToggle);
+            // Device info section — cleared and rebuilt on each refresh.
+            this._devicesSection = new PopupMenuSection();
+            this.menu.addMenuItem(this._devicesSection);
 
             // Refresh device data when the menu is opened.
             this._lastRefreshTime = 0;
@@ -212,43 +251,20 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
-        // Load the two NVMe SVG icons for comparison in the panel.
-        // Left: nvme-fill-dark.svg (filled), Right: nvme-dark.svg (outline).
+        // Load the NVMe SVG icon for the panel (outline).
         // -------------------------------------------------------------------
         _setupIcon() {
-            const iconDir = GLib.build_filenamev([this._extensionPath || '', 'icons', 'bootstrap']);
-
-            const fillPath = GLib.build_filenamev([iconDir, 'nvme-fill-dark.svg']);
-            const outlinePath = GLib.build_filenamev([iconDir, 'nvme-dark.svg']);
-
-            if (GLib.file_test(fillPath, GLib.FileTest.EXISTS)) {
-                this._panelIconFill.set_gicon(new Gio.FileIcon({
-                    file: Gio.File.new_for_path(fillPath),
-                }));
-                _log(`Panel icon (fill) loaded: ${fillPath}`);
+            const panelIcon = this._loadIconByName(ICONS.NvmeDark)
+                || this._loadIconByName(ICONS.Nvme);
+            if (panelIcon) {
+                this._panelIcon.set_gicon(panelIcon);
+                _debug(`Panel icon loaded: ${ICONS.NvmeDark}`);
             } else {
-                _log(`Panel icon (fill) not found: ${fillPath}`);
-            }
-
-            if (GLib.file_test(outlinePath, GLib.FileTest.EXISTS)) {
-                this._panelIconOutline.set_gicon(new Gio.FileIcon({
-                    file: Gio.File.new_for_path(outlinePath),
-                }));
-                _log(`Panel icon (outline) loaded: ${outlinePath}`);
-            } else {
-                _log(`Panel icon (outline) not found: ${outlinePath}`);
+                _warn(`Panel icon not found: ${ICONS.NvmeDark}`);
             }
 
             // Cache the device icon for menu headers.
-            const devIconPath = GLib.build_filenamev([iconDir, 'nvme-dark.svg']);
-            if (GLib.file_test(devIconPath, GLib.FileTest.EXISTS)) {
-                this._deviceIcon = new Gio.FileIcon({ file: Gio.File.new_for_path(devIconPath) });
-            } else {
-                const devFallback = GLib.build_filenamev([iconDir, 'nvme.svg']);
-                this._deviceIcon = GLib.file_test(devFallback, GLib.FileTest.EXISTS)
-                    ? new Gio.FileIcon({ file: Gio.File.new_for_path(devFallback) })
-                    : null;
-            }
+            this._deviceIcon = panelIcon;
         }
 
         // -------------------------------------------------------------------
@@ -261,14 +277,14 @@ const Indicator = GObject.registerClass(
                 this._refreshDevices();
                 return GLib.SOURCE_CONTINUE;
             });
-            _log('Polling timer started (5s interval)');
+            _debug('Polling timer started (5s interval)');
         }
 
         _stopPolling() {
             if (this._pollingTimer) {
                 GLib.source_remove(this._pollingTimer);
                 this._pollingTimer = null;
-                _log('Polling timer stopped');
+                _debug('Polling timer stopped');
             }
         }
 
@@ -280,7 +296,7 @@ const Indicator = GObject.registerClass(
             if (isV2Installed()) return;
             const setupPath = GLib.build_filenamev([this._extensionPath || '', SETUP_SCRIPT_NAME]);
             if (!GLib.file_test(setupPath, GLib.FileTest.EXISTS)) {
-                _log(`setup-polkit.sh missing — disabling toggle`);
+                _warn('setup-polkit.sh missing — disabling toggle');
                 this._v2Toggle.setSensitive(false);
             }
         }
@@ -296,26 +312,26 @@ const Indicator = GObject.registerClass(
 
             const nvmeBin = GLib.find_program_in_path('nvme');
             if (!nvmeBin) {
-                _log('nvme-cli not found');
+                _warn('nvme-cli not found');
                 return null;
             }
 
             const listResult = runCommandSync([nvmeBin, 'list', '-o', 'json']);
-            _log(`nvme list: ok=${listResult.ok} exitCode=${listResult.exitCode} stdout_len=${listResult.stdout?.length || 0} stderr_len=${listResult.stderr?.length || 0}`);
+            _debug(`nvme list: ok=${listResult.ok} exitCode=${listResult.exitCode} stdout_len=${listResult.stdout?.length || 0} stderr_len=${listResult.stderr?.length || 0}`);
             if (!listResult.ok || listResult.exitCode !== 0) {
-                _log('Failed to list NVMe devices');
+                _warn('Failed to list NVMe devices');
                 return null;
             }
 
             try {
                 const parsed = JSON.parse(listResult.stdout);
-                this._cachedDevices = parsed.Devices || [];
-                _log(`nvme list: found ${this._cachedDevices.length} devices (cached)`);
+                this._cachedDevices = normalizeDeviceList(parsed);
+                _debug(`nvme list: found ${this._cachedDevices.length} devices (cached)`);
                 return this._cachedDevices;
             } catch (e) {
-                _log(`nvme list: JSON parse error: ${e.message}`);
-                _log(`nvme list: raw stdout: ${listResult.stdout?.substring(0, 200) || '(empty)'}`);
-                _log(`nvme list: raw stderr: ${listResult.stderr?.substring(0, 200) || '(empty)'}`);
+                _warn(`nvme list: JSON parse error: ${e.message}`);
+                _debug(`nvme list: raw stdout: ${listResult.stdout?.substring(0, 200) || '(empty)'}`);
+                _debug(`nvme list: raw stderr: ${listResult.stderr?.substring(0, 200) || '(empty)'}`);
                 return null;
             }
         }
@@ -331,12 +347,7 @@ const Indicator = GObject.registerClass(
 
             // Load device icon (cached).
             if (!this._deviceIcon) {
-                const iconPath = GLib.build_filenamev([this._extensionPath || '', 'icons', 'bootstrap', 'nvme.svg']);
-                if (GLib.file_test(iconPath, GLib.FileTest.EXISTS)) {
-                    this._deviceIcon = new Gio.FileIcon({
-                        file: Gio.File.new_for_path(iconPath),
-                    });
-                }
+                this._deviceIcon = this._loadIconByName(ICONS.Nvme);
             }
 
             // --- Step 1: get cached NVMe devices ---
@@ -374,7 +385,7 @@ const Indicator = GObject.registerClass(
                     if (smartResult.ok && smartResult.exitCode === 0) {
                         try {
                             const smart = JSON.parse(smartResult.stdout);
-                            this._addSmartInfo(smart);
+                            this._addSmartInfo(smart, dev.ModelNumber);
                         } catch (e) {
                             this._addInfoLine(_('  SMART: parse error'));
                         }
@@ -409,6 +420,42 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
+        // Load a bundled icon by name from icons/bootstrap/ as a GIcon.
+        // Returns a cached Gio.FileIcon, or null if the file is missing.
+        // `iconName` is the bare icon name (no extension), e.g.
+        // ICONS.ThermometerLow, resolved to icons/bootstrap/thermometer-low.svg.
+        // -------------------------------------------------------------------
+        _loadIconByName(iconName) {
+            if (!iconName) return null;
+            if (iconName in this._iconCache) return this._iconCache[iconName];
+
+            const iconPath = GLib.build_filenamev([
+                this._extensionPath || '', ICONS_DIR, ICONS_BOOTSTRAP,
+                `${iconName}${ICON_EXTENSION}`,
+            ]);
+            const gicon = fileIcon(iconPath);
+            if (gicon === null) {
+                _warn(`icon not found: ${iconPath}`);
+            }
+            this._iconCache[iconName] = gicon;
+            return gicon;
+        }
+
+        // -------------------------------------------------------------------
+        // Build an St.Icon for a bundled icon name: GIcon when the bundled SVG
+        // exists, falling back to icon_name (system theme) otherwise.
+        // -------------------------------------------------------------------
+        _createIcon(iconName, iconSize = 16, styleClass = 'nvme-info-icon') {
+            const gicon = this._loadIconByName(iconName);
+            return new St.Icon({
+                gicon,
+                icon_name: gicon ? null : iconName,
+                icon_size: iconSize,
+                style_class: styleClass,
+            });
+        }
+
+        // -------------------------------------------------------------------
         // Add a non-interactive info line with optional icon.
         // -------------------------------------------------------------------
         _addInfoLine(text, styleClass = '', iconName = null) {
@@ -419,11 +466,7 @@ const Indicator = GObject.registerClass(
             }
             // Prepend icon if provided
             if (iconName) {
-                const icon = new St.Icon({
-                    icon_name: iconName,
-                    icon_size: 16,
-                    style_class: 'nvme-info-icon',
-                });
+                const icon = this._createIcon(iconName);
                 // Insert icon at the beginning of the item's children
                 const children = item.get_children();
                 if (children.length > 0) {
@@ -439,31 +482,42 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
-        // Get thermometer icon based on temperature range.
+        // Get thermometer icon for a temperature reading.
+        // The red tier is driven by the drive's critical_warning bit 1
+        // (controller-configured threshold exceeded), not a guessed °C value.
+        // `criticalWarning` is the raw NVMe SMART critical_warning byte.
         // ---------------------------------------------------------------------------
-        _getThermometerIcon(tempCelsius) {
+        _getThermometerIcon(tempCelsius, criticalWarning) {
             if (tempCelsius === null || tempCelsius === undefined) {
                 return null;
             }
-            if (tempCelsius < 40) {
-                return 'thermometer-low';
-            } else if (tempCelsius < 60) {
-                return 'thermometer-half';
+            if (criticalWarning & CRITICAL_WARNING_TEMP) {
+                return ICONS.ThermometerHigh;
+            }
+            if (tempCelsius < TEMP_WARM_C) {
+                return ICONS.ThermometerLow;
+            } else if (tempCelsius < TEMP_HOT_C) {
+                return ICONS.ThermometerHalf;
             } else {
-                return 'thermometer-high';
+                return ICONS.ThermometerHigh;
             }
         }
 
         // -------------------------------------------------------------------
-        // Get temperature style class based on range.
+        // Get temperature style class. Red when the drive signals an
+        // over-threshold condition (critical_warning bit 1); otherwise the
+        // green/orange heuristic tiers.
         // ---------------------------------------------------------------------------
-        _getTempStyle(tempCelsius) {
+        _getTempStyle(tempCelsius, criticalWarning) {
             if (tempCelsius === null || tempCelsius === undefined) {
                 return 'nvme-smart-attr';
             }
-            if (tempCelsius < 40) {
+            if (criticalWarning & CRITICAL_WARNING_TEMP) {
+                return 'nvme-smart-warning-red';
+            }
+            if (tempCelsius < TEMP_WARM_C) {
                 return 'nvme-smart-attr';
-            } else if (tempCelsius < 60) {
+            } else if (tempCelsius < TEMP_HOT_C) {
                 return 'nvme-smart-warning-orange';
             } else {
                 return 'nvme-smart-warning-red';
@@ -474,43 +528,30 @@ const Indicator = GObject.registerClass(
         // Parse SMART JSON and add structured sections to the device section.
         // Uses the modular parser (BaseParser / SamsungParser).
         // -------------------------------------------------------------------
-        _addSmartInfo(smartRaw) {
-            const smart = parseSmart(smartRaw);
+        _addSmartInfo(smartRaw, modelHint = null) {
+            const smart = parseSmart(smartRaw, modelHint);
             const manuf = smart.manufacturer;
 
             // ---------------------------------------------------------------
             // Temperature Section
             // ---------------------------------------------------------------
             if (smart.temperature.composite !== null) {
-                const icon = this._getThermometerIcon(smart.temperature.composite);
-                const style = this._getTempStyle(smart.temperature.composite);
+                const cw = smart.alerts.criticalWarning || 0;
+                const icon = this._getThermometerIcon(smart.temperature.composite, cw);
+                const style = this._getTempStyle(smart.temperature.composite, cw);
 
-                if (manuf === 'Samsung' && smart.temperature.sensors.length >= 2) {
-                    // Samsung: T_icon: yyy°C (controller: xxx ; NAND: zzz)
-                    const sensor1 = smart.temperature.sensors[0] || '?';
-                    const sensor2 = smart.temperature.sensors[1] || '?';
-                    this._addInfoLine(
-                        `${smart.temperature.composite}°C (controller: ${sensor1} ; NAND: ${sensor2})`,
-                        style,
-                        icon
-                    );
-                } else {
-                    // Generic: T_icon: yyy°C
-                    this._addInfoLine(
-                        `${smart.temperature.composite}°C`,
-                        style,
-                        icon
-                    );
-                }
+                const line = formatTemperatureLine(
+                    manuf,
+                    smart.temperature.composite,
+                    smart.temperature.sensors
+                );
+                this._addInfoLine(line, style, icon);
 
-                // Additional sensors (if any, not Samsung or Samsung with >2 sensors)
-                if (manuf !== 'Samsung' && smart.temperature.sensors.length > 0) {
-                    for (let i = 0; i < smart.temperature.sensors.length; i++) {
-                        const sensorTemp = smart.temperature.sensors[i];
-                        const sensorIcon = this._getThermometerIcon(sensorTemp);
-                        const sensorStyle = this._getTempStyle(sensorTemp);
-                        this._addInfoLine(`  ${_('Sensor')} ${i + 1}: ${sensorTemp}°C`, sensorStyle, sensorIcon);
-                    }
+                // Additional sensors as separate rows (non-Samsung only).
+                for (const row of formatSensorRows(manuf, smart.temperature.sensors)) {
+                    const sensorIcon = this._getThermometerIcon(row.temp, cw);
+                    const sensorStyle = this._getTempStyle(row.temp, cw);
+                    this._addInfoLine(row.text, sensorStyle, sensorIcon);
                 }
             }
 
@@ -573,7 +614,7 @@ const Indicator = GObject.registerClass(
             this._v2Toggle._state = active;
             if (this._v2Toggle._switch)
                 this._v2Toggle._switch.state = active;
-            _log(`_updateV2ToggleState(${active}) — state set directly, no signal emitted`);
+            _debug(`_updateV2ToggleState(${active}) — state set directly, no signal emitted`);
         }
 
         // -------------------------------------------------------------------
@@ -581,34 +622,34 @@ const Indicator = GObject.registerClass(
         // -------------------------------------------------------------------
         _installV2Stack() {
             const setupPath = GLib.build_filenamev([this._extensionPath || '', SETUP_SCRIPT_NAME]);
-            _log(`_installV2Stack: setupPath=${setupPath}`);
+            _debug(`_installV2Stack: setupPath=${setupPath}`);
 
             if (!GLib.file_test(setupPath, GLib.FileTest.EXISTS)) {
-                _log(`setup-polkit.sh not found: ${setupPath}`);
-                Main.notify(_('setup-polkit.sh not found. Place it in the extension directory.'));
+                _warn(`setup-polkit.sh not found: ${setupPath}`);
+                notifyError(_('setup-polkit.sh not found. Place it in the extension directory.'));
                 this._v2Toggle.setSensitive(false);
                 this._v2Updating = false;
                 return;
             }
 
-            _log('Running pkexec setup-polkit.sh...');
+            _debug('Running pkexec setup-polkit.sh...');
             this._v2Toggle.setSensitive(false);
 
             const result = runPkexecSync([setupPath]);
 
             this._v2Toggle.setSensitive(true);
 
-            if (result.stderr) _log(`stderr: ${result.stderr.trim()}`);
-            if (result.stdout) _log(`stdout: ${result.stdout.trim()}`);
+            if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
+            if (result.stdout) _debug(`stdout: ${result.stdout.trim()}`);
 
             if (result.ok && result.exitCode === 0) {
-                _log('✓ Installation complete');
-                logAndNotify(_('NVMe polkit stack installed!'), _('Please log out and back in for new group membership.'));
+                _debug('Installation complete');
+                notify(_('NVMe polkit stack installed!'), _('Please log out and back in for new group membership.'));
                 this._updateV2ToggleState(true);
                 this._startPolling();
             } else {
-                _log(`✗ Installation failed (exit code ${result.exitCode})`);
-                Main.notify(_('Installation failed (exit code ') + result.exitCode + ')');
+                _warn(`Installation failed (exit code ${result.exitCode})`);
+                notifyError(_('Installation failed (exit code ') + result.exitCode + ')');
                 this._updateV2ToggleState(false);
             }
 
@@ -621,11 +662,11 @@ const Indicator = GObject.registerClass(
         _uninstallV2Stack() {
             if (!isUninstallAvailable()) {
                 _uninstallNotFoundCount++;
-                _log(`Uninstall script not found. (count=${_uninstallNotFoundCount}/${KILL_THRESHOLD})`);
+                _debug(`Uninstall script not found. (count=${_uninstallNotFoundCount}/${KILL_THRESHOLD})`);
 
                 if (_uninstallNotFoundCount >= KILL_THRESHOLD) {
-                    _log(`⛔ Kill threshold reached (${KILL_THRESHOLD}). Disabling extension to break loop.`);
-                    Main.notify(`NVMe Monitor: boucle détectée — extension désactivée.`);
+                    _error(`Kill threshold reached (${KILL_THRESHOLD}). Disabling extension to break loop.`);
+                    notifyError(`NVMe Monitor`, `Loop detected — extension disabled.`);
                     try {
                         const dbus = Gio.DBus.session;
                         dbus.call_sync(
@@ -640,35 +681,35 @@ const Indicator = GObject.registerClass(
                             null
                         );
                     } catch (e) {
-                        _log(`Could not disable via D-Bus: ${e.message}`);
+                        _warn(`Could not disable via D-Bus: ${e.message}`);
                     }
                     return;
                 }
 
-                Main.notify(_('Uninstall script not found.'));
+                notifyError(_('Uninstall script not found.'));
                 this._updateV2ToggleState(true);
                 this._v2Updating = false;
                 return;
             }
 
-            _log('Running pkexec nvme-smart-uninstall.sh...');
+            _debug('Running pkexec nvme-smart-uninstall.sh...');
             this._v2Toggle.setSensitive(false);
 
             const result = runPkexecSync([UNINSTALL_PATH]);
 
             this._v2Toggle.setSensitive(true);
 
-            if (result.stderr) _log(`stderr: ${result.stderr.trim()}`);
-            if (result.stdout) _log(`stdout: ${result.stdout.trim()}`);
+            if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
+            if (result.stdout) _debug(`stdout: ${result.stdout.trim()}`);
 
             if (result.ok && result.exitCode === 0) {
-                _log('✓ Uninstall complete');
-                logAndNotify(_('NVMe polkit stack uninstalled.'), '');
+                _debug('Uninstall complete');
+                notify(_('NVMe polkit stack uninstalled.'), '');
                 this._updateV2ToggleState(false);
                 this._stopPolling();
             } else {
-                _log(`✗ Uninstall failed (exit code ${result.exitCode})`);
-                Main.notify(_('Uninstall failed (exit code ') + result.exitCode + ')');
+                _warn(`Uninstall failed (exit code ${result.exitCode})`);
+                notifyError(_('Uninstall failed (exit code ') + result.exitCode + ')');
                 this._updateV2ToggleState(true);
             }
 
@@ -684,11 +725,13 @@ const Indicator = GObject.registerClass(
 
 export default class IndicatorExampleExtension extends Extension {
     enable() {
-        _log('enable() enter');
+        _debug('enable() enter');
         this._indicator = new Indicator();
         this._indicator._extensionPath = this.path;
         this._indicator._setupIcon();
         this._indicator._checkSetupScript();
+        // Detect the installed nvme-cli version once and warn if affected.
+        _checkNvmeCliVersion(GLib.find_program_in_path('nvme'));
         // Start polling if the polkit stack is already installed.
         if (isV2Installed()) {
             this._indicator._startPolling();
@@ -697,11 +740,11 @@ export default class IndicatorExampleExtension extends Extension {
         // Load extension stylesheet (device header, meta lines, smart values)
         this._stylesheet = Gio.File.new_for_path(GLib.build_filenamev([this.path, 'stylesheet.css']));
         St.ThemeContext.get_for_stage(global.stage).get_theme().load_stylesheet(this._stylesheet);
-        _log('enable() exit');
+        _debug('enable() exit');
     }
 
     disable() {
-        _log('disable() enter');
+        _debug('disable() enter');
         if (this._stylesheet) {
             St.ThemeContext.get_for_stage(global.stage).get_theme().unload_stylesheet(this._stylesheet);
             this._stylesheet = null;
@@ -710,6 +753,6 @@ export default class IndicatorExampleExtension extends Extension {
             this._indicator.destroy();
         }
         this._indicator = null;
-        _log('disable() exit');
+        _debug('disable() exit');
     }
 }
