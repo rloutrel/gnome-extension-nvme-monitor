@@ -130,6 +130,35 @@ The extension parses both layouts (`deviceList.js`) and warns affected users
 - Do not add dependencies. The repo uses only GObject introspection and Node's
   built-in test runner.
 
+## Translations (gettext)
+
+The extension is internationalized with gettext (i18n). GNOME Shell
+auto-initializes the domain named in `metadata.json` (`gettext-domain`).
+
+- All user-visible strings in `extension.js` are wrapped in `_()`, imported
+  from `resource:///org/gnome/shell/extensions/extension.js`.
+- **Pure modules must stay free of gettext.** `tempFormat.js` accepts
+  translated labels (Controller/NAND/Sensor) via an optional `labels`
+  argument and falls back to English defaults; the caller (`extension.js`)
+  passes `_(...)` results in.
+- Translation sources live in `po/`:
+  - `POTFILES` — list of files containing translatable strings.
+  - `LINGUAS` — list of language codes with translations.
+  - `nvme-monitor@rloutrel.github.com.pot` — message template.
+  - `fr.po`, `de.po` — per-language translations.
+- When strings are added/removed/changed, regenerate the POT template and
+  update the `.po` files. With gettext installed:
+  ```bash
+  cd nvme-monitor@rloutrel.github.com
+  xgettext --from-code=UTF-8 --output=po/nvme-monitor@rloutrel.github.com.pot \
+      --files-from=po/POTFILES --keyword=_ --keyword=N_
+  ```
+  (No `xgettext` in the dev environment — edit the `.pot`/`.po` by hand
+  instead.)
+- Compiled `.mo` files (in `locale/<lang>/LC_MESSAGES/`) are produced at
+  pack time via `gnome-extensions pack --podir=po`. Do not commit `.mo`
+  files.
+
 ## Testing
 
 Pure modules are unit-tested with Node's built-in runner (no test framework,

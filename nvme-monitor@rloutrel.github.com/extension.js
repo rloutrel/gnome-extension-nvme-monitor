@@ -879,15 +879,21 @@ const Indicator = GObject.registerClass(
                 const icon = this._getThermometerIcon(smart.temperature.composite, cw);
                 const style = this._getTempStyle(smart.temperature.composite, cw);
 
+                const tempLabels = {
+                    controller: _('Controller'),
+                    nand: _('NAND'),
+                    sensor: _('Sensor'),
+                };
                 const line = formatTemperatureLine(
                     manuf,
                     smart.temperature.composite,
-                    smart.temperature.sensors
+                    smart.temperature.sensors,
+                    tempLabels
                 );
                 this._addInfoLine(line, style, icon);
 
                 // Additional sensors as separate rows (non-Samsung only).
-                for (const row of formatSensorRows(manuf, smart.temperature.sensors)) {
+                for (const row of formatSensorRows(manuf, smart.temperature.sensors, tempLabels)) {
                     const sensorIcon = this._getThermometerIcon(row.temp, cw);
                     const sensorStyle = this._getTempStyle(row.temp, cw);
                     this._addInfoLine(row.text, sensorStyle, sensorIcon);
@@ -1086,6 +1092,11 @@ const Indicator = GObject.registerClass(
     });
 
 export default class IndicatorExampleExtension extends Extension {
+    constructor(metadata) {
+        super(metadata);
+        this.initTranslations();
+    }
+
     enable() {
         _debug('enable() enter');
         this._indicator = new Indicator();
