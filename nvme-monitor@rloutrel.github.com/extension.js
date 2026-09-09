@@ -162,16 +162,10 @@ const Indicator = GObject.registerClass(
 
             // ---------------------------------------------------------------
             // Menu structure:
-            //   [device section]  ← dynamically rebuilt on menu open
-            //   [separator]
             //   [Service Setup toggle]
+            //   [separator]
+            //   [device section]  ← dynamically rebuilt on menu open
             // ---------------------------------------------------------------
-
-            // Device info section — cleared and rebuilt on each refresh.
-            this._devicesSection = new PopupMenuSection();
-            this.menu.addMenuItem(this._devicesSection);
-
-            this.menu.addMenuItem(new PopupSeparatorMenuItem());
 
             // ---------------------------------------------------------------
             // v2: NVMe Stack toggle (install/uninstall)
@@ -199,6 +193,12 @@ const Indicator = GObject.registerClass(
                 }
             });
             this.menu.addMenuItem(this._v2Toggle);
+
+            this.menu.addMenuItem(new PopupSeparatorMenuItem());
+
+            // Device info section — cleared and rebuilt on each refresh.
+            this._devicesSection = new PopupMenuSection();
+            this.menu.addMenuItem(this._devicesSection);
 
             // Refresh device data when the menu is opened.
             this._lastRefreshTime = 0;
