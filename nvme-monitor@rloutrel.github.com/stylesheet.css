@@ -62,3 +62,27 @@
     color: #ffffff;
     font-size: 0.9em;
 }
+
+/* Click-to-explain overlay (title + body), transient. */
+.nvme-explain-overlay {
+    border-radius: 10px;
+    padding: 12px 14px;
+    spacing: 6px;
+    background-color: rgba(0, 0, 0, 0.9);
+    color: #ffffff;
+    max-width: 320px;
+}
+
+.nvme-explain-title {
+    font-weight: bold;
+    font-size: 1em;
+}
+
+.nvme-explain-body {
+    font-size: 0.9em;
+}
+
+/* Metric section: each half of the data/host line. */
+.nvme-metric-section {
+    spacing: 6px;
+}

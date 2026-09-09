@@ -58,3 +58,44 @@ export function formatPowerOnHours(hours) {
     if (days > 0) return `${days}d ${h % 24}h`;
     return `${h}h`;
 }
+
+// Thresholds for the Available Spare gauge color code (percent).
+const SPARE_RED = 15;
+const SPARE_ORANGE = 50;
+
+// Thresholds for the Percentage Used gauge color code (percent).
+// The logic is inverted relative to Available Spare: high usage is bad.
+const USED_ORANGE = 50;
+const USED_RED = 85;
+
+// RGB triples (0-1) for the gauge segments.
+const COLOR_RED = [0.75, 0.11, 0.14];
+const COLOR_ORANGE = [0.88, 0.48, 0.14];
+const COLOR_GREEN = [0.18, 0.68, 0.34];
+const COLOR_TRACK = [0.2, 0.2, 0.2];
+
+/**
+ * Available Spare gauge color: red below 15%, orange below 50%, else green.
+ * @param {number} percent
+ * @returns {number[]} [r, g, b]
+ */
+export function spareGaugeColor(percent) {
+    if (percent < SPARE_RED) return COLOR_RED;
+    if (percent < SPARE_ORANGE) return COLOR_ORANGE;
+    return COLOR_GREEN;
+}
+
+/**
+ * Percentage Used gauge color: red above 85%, orange above 50%, else green
+ * (inverted logic).
+ * @param {number} percent
+ * @returns {number[]} [r, g, b]
+ */
+export function usedGaugeColor(percent) {
+    if (percent >= USED_RED) return COLOR_RED;
+    if (percent >= USED_ORANGE) return COLOR_ORANGE;
+    return COLOR_GREEN;
+}
+
+export { COLOR_TRACK };
+

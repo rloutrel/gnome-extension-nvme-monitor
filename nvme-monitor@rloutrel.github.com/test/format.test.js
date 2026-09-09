@@ -12,6 +12,8 @@ import {
     formatCompactNumber,
     formatDataUnits,
     formatPowerOnHours,
+    spareGaugeColor,
+    usedGaugeColor,
 } from '../format.js';
 
 // ---------------------------------------------------------------------------
@@ -91,4 +93,46 @@ test('formatPowerOnHours: over a year shows years and days', () => {
 
 test('formatPowerOnHours: non-finite falls back to <n>h', () => {
     assert.equal(formatPowerOnHours('abc'), 'abch');
+});
+
+// ---------------------------------------------------------------------------
+// spareGaugeColor
+// ---------------------------------------------------------------------------
+
+const COLOR_RED = [0.75, 0.11, 0.14];
+const COLOR_ORANGE = [0.88, 0.48, 0.14];
+const COLOR_GREEN = [0.18, 0.68, 0.34];
+
+test('spareGaugeColor: red below 15%', () => {
+    assert.deepEqual(spareGaugeColor(0), COLOR_RED);
+    assert.deepEqual(spareGaugeColor(14), COLOR_RED);
+});
+
+test('spareGaugeColor: orange below 50%', () => {
+    assert.deepEqual(spareGaugeColor(15), COLOR_ORANGE);
+    assert.deepEqual(spareGaugeColor(49), COLOR_ORANGE);
+});
+
+test('spareGaugeColor: green at 50% and above', () => {
+    assert.deepEqual(spareGaugeColor(50), COLOR_GREEN);
+    assert.deepEqual(spareGaugeColor(100), COLOR_GREEN);
+});
+
+// ---------------------------------------------------------------------------
+// usedGaugeColor (inverted logic)
+// ---------------------------------------------------------------------------
+
+test('usedGaugeColor: green below 50%', () => {
+    assert.deepEqual(usedGaugeColor(0), COLOR_GREEN);
+    assert.deepEqual(usedGaugeColor(49), COLOR_GREEN);
+});
+
+test('usedGaugeColor: orange at 50% and up to 84%', () => {
+    assert.deepEqual(usedGaugeColor(50), COLOR_ORANGE);
+    assert.deepEqual(usedGaugeColor(84), COLOR_ORANGE);
+});
+
+test('usedGaugeColor: red at 85% and above', () => {
+    assert.deepEqual(usedGaugeColor(85), COLOR_RED);
+    assert.deepEqual(usedGaugeColor(100), COLOR_RED);
 });

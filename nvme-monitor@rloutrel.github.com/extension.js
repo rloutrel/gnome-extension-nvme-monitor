@@ -3,6 +3,7 @@ import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import Cairo from 'cairo';
 
 import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -12,7 +13,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 // Import the SMART parser
 import { parseSmart } from './smartParser.js';
 // Import endurance value formatting (pure, unit-tested)
-import { formatCompactNumber, formatDataUnits, formatPowerOnHours } from './format.js';
+import { formatCompactNumber, formatDataUnits, formatPowerOnHours, spareGaugeColor, usedGaugeColor, COLOR_TRACK } from './format.js';
 // Import temperature line formatting (pure, unit-tested)
 import { formatTemperatureLine, formatSensorRows } from './tempFormat.js';
 // Import nvme-cli version detection (pure, unit-tested)
@@ -75,6 +76,11 @@ const ICONS_DIR = 'icons';
 const ICONS_BOOTSTRAP = 'bootstrap';
 const ICON_EXTENSION = '.svg';
 
+// Leading section icons (plug, database, thermometer, device header) are
+// rendered larger than the per-value inline icons.
+const SECTION_ICON_SIZE = 22;
+const VALUE_ICON_SIZE = 16;
+
 // Temperature thresholds (°C) for the heuristic green/orange tiers.
 // The red tier is driven by the drive's own critical_warning signal, not a
 // guessed °C value (see CRITICAL_WARNING_TEMP). 70°C aligns with where most
@@ -95,7 +101,7 @@ const ICONS = Object.freeze({
     ThermometerLow: 'thermometer-low',
     ThermometerHalf: 'thermometer-half',
     ThermometerHigh: 'thermometer-high',
-    Plug: 'plug',
+    Plug: 'plugin',
     Database: 'database',
     ArrowLeftRight: 'arrow-left-right',
     Eyeglasses: 'eyeglasses',
@@ -414,7 +420,7 @@ const Indicator = GObject.registerClass(
             if (this._deviceIcon) {
                 header.add_child(new St.Icon({
                     gicon: this._deviceIcon,
-                    icon_size: 16,
+                    icon_size: SECTION_ICON_SIZE,
                 }));
             }
 
@@ -471,9 +477,9 @@ const Indicator = GObject.registerClass(
             if (styleClass && item.label) {
                 item.label.add_style_class_name(styleClass);
             }
-            // Prepend icon if provided
+            // Prepend section icon (larger) if provided
             if (iconName) {
-                const icon = this._createIcon(iconName);
+                const icon = this._createIcon(iconName, SECTION_ICON_SIZE);
                 // Insert icon at the beginning of the item's children
                 const children = item.get_children();
                 if (children.length > 0) {
@@ -541,47 +547,61 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
-        // Add a non-interactive line made of icon+value segments, each with a
-        // hover tooltip revealing the raw value. Each segment is
-        // { iconName, value, tooltip?, sectionIcon? }. When `sectionIcon`
-        // is set, a non-interactive group icon is rendered before the
-        // segment, with a larger gap to visually separate the groups.
+        // Add a non-interactive line of icon+value segments, each with a
+        // hover tooltip revealing the raw value. Segments are grouped into
+        // sections by `sectionIcon`; the line width is distributed evenly
+        // across the sections, and within a section the subsections (icon +
+        // value pairs) are laid out. Each segment is
+        // { iconName, value, tooltip?, sectionIcon? }.
         // -------------------------------------------------------------------
         _addMetricSegmentsLine(segments, styleClass = 'nvme-smart-attr') {
             if (!segments || segments.length === 0) return;
+
+            // Group segments into consecutive sections. A segment starts a
+            // new section when it carries a `sectionIcon`.
+            const sections = [];
+            for (const seg of segments) {
+                if (seg.sectionIcon || sections.length === 0) {
+                    sections.push({ sectionIcon: seg.sectionIcon || null, items: [seg] });
+                } else {
+                    sections[sections.length - 1].items.push(seg);
+                }
+            }
+
             const item = new PopupBaseMenuItem({ reactive: false, can_focus: false });
 
-            for (let i = 0; i < segments.length; i++) {
-                const seg = segments[i];
+            for (let s = 0; s < sections.length; s++) {
+                const section = sections[s];
+                const box = new St.BoxLayout({ x_expand: true, x_align: Clutter.ActorAlign.START });
 
-                if (seg.sectionIcon) {
-                    if (i > 0) {
-                        const gap = new St.Label({ text: '   ', y_align: Clutter.ActorAlign.CENTER });
-                        item.add_child(gap);
+                if (section.sectionIcon) {
+                    box.add_child(this._createIcon(section.sectionIcon, SECTION_ICON_SIZE, 'nvme-info-icon'));
+                }
+
+                const subBox = new St.BoxLayout({ x_expand: true, x_align: Clutter.ActorAlign.CENTER, style_class: 'nvme-metric-section' });
+                box.add_child(subBox);
+
+                for (let i = 0; i < section.items.length; i++) {
+                    const seg = section.items[i];
+
+                    const iconActor = this._createIcon(seg.iconName, VALUE_ICON_SIZE, 'nvme-info-icon');
+                    if (seg.tooltip) {
+                        iconActor.reactive = true;
+                        this._attachHoverTooltip(iconActor, seg.tooltip);
                     }
-                    item.add_child(this._createIcon(seg.sectionIcon, 16, 'nvme-info-icon'));
+                    subBox.add_child(iconActor);
+
+                    const valueLabel = new St.Label({ text: seg.value, x_expand: true });
+                    valueLabel.add_style_class_name(styleClass);
+                    valueLabel.y_align = Clutter.ActorAlign.CENTER;
+                    if (seg.tooltip) {
+                        valueLabel.reactive = true;
+                        this._attachHoverTooltip(valueLabel, seg.tooltip);
+                    }
+                    subBox.add_child(valueLabel);
                 }
 
-                const iconActor = this._createIcon(seg.iconName, 16, 'nvme-info-icon');
-                if (seg.tooltip) {
-                    iconActor.reactive = true;
-                    this._attachHoverTooltip(iconActor, seg.tooltip);
-                }
-                item.add_child(iconActor);
-
-                const valueLabel = new St.Label({ text: seg.value });
-                valueLabel.add_style_class_name(styleClass);
-                valueLabel.y_align = Clutter.ActorAlign.CENTER;
-                if (seg.tooltip) {
-                    valueLabel.reactive = true;
-                    this._attachHoverTooltip(valueLabel, seg.tooltip);
-                }
-                item.add_child(valueLabel);
-
-                if (i < segments.length - 1) {
-                    const sep = new St.Label({ text: '  ', y_align: Clutter.ActorAlign.CENTER });
-                    item.add_child(sep);
-                }
+                item.add_child(box);
             }
 
             this._devicesSection.addMenuItem(item);
@@ -631,6 +651,134 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
+        // Show a click-triggered explanation overlay near `actor`. It is a
+        // transient St.BoxLayout (title + body) in Main.uiGroup, dismissed
+        // by the next pointer click anywhere on the stage.
+        // -------------------------------------------------------------------
+        _showExplanationOverlay(actor, title, body) {
+            this._hideExplanationOverlay();
+
+            const box = new St.BoxLayout({
+                vertical: true,
+                style_class: 'nvme-explain-overlay',
+                x_expand: false,
+            });
+            const titleLabel = new St.Label({ text: title, style_class: 'nvme-explain-title' });
+            titleLabel.clutter_text.line_wrap = true;
+            const bodyLabel = new St.Label({ text: body, style_class: 'nvme-explain-body' });
+            bodyLabel.clutter_text.line_wrap = true;
+            box.add_child(titleLabel);
+            box.add_child(bodyLabel);
+
+            Main.uiGroup.add_child(box);
+            this._explainOverlay = box;
+
+            const [stageX, stageY] = actor.get_transformed_position();
+            const [, h] = actor.get_size();
+            let x = Math.round(stageX);
+            let y = Math.round(stageY + h + 6);
+            const idx = Main.layoutManager.find_index_for_actor(actor);
+            const area = Main.layoutManager.monitors[idx];
+            if (area) {
+                const [, natWidth] = box.get_preferred_width(-1);
+                const [, natHeight] = box.get_preferred_height(-1);
+                x = Math.max(area.x, Math.min(x, area.x + area.width - natWidth));
+                if (y + natHeight > area.y + area.height) {
+                    y = Math.round(stageY) - 6 - natHeight;
+                }
+            }
+            box.set_position(x, y);
+
+            this._explainClickId = global.stage.connect('button-press-event', () => {
+                this._hideExplanationOverlay();
+                return Clutter.EVENT_PROPAGATE;
+            });
+        }
+
+        _hideExplanationOverlay() {
+            if (this._explainClickId) {
+                global.stage.disconnect(this._explainClickId);
+                this._explainClickId = null;
+            }
+            if (this._explainOverlay) {
+                this._explainOverlay.destroy();
+                this._explainOverlay = null;
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Build a circular "camembert" gauge: a donut whose filled arc is
+        // `percent` of a full circle, colored by `color` ([r,g,b]). The rest
+        // of the ring uses the dim track color. Clicking the gauge shows an
+        // explanation overlay (title/body).
+        // -------------------------------------------------------------------
+        _createGauge(percent, color, size, title, body) {
+            const area = new St.DrawingArea({
+                width: size,
+                height: size,
+                reactive: true,
+                can_focus: true,
+                track_hover: true,
+            });
+            area._gaugePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+            area._gaugeColor = color;
+
+            area.connect('repaint', (a) => {
+                const cr = a.get_context();
+                const [w, h] = a.get_surface_size();
+                const cx = w / 2;
+                const cy = h / 2;
+                const r = Math.min(w, h) / 2 - 1;
+
+                // Track (full ring background).
+                cr.setSourceRGB(COLOR_TRACK[0], COLOR_TRACK[1], COLOR_TRACK[2]);
+                cr.arc(cx, cy, r, 0, 2 * Math.PI);
+                cr.fill();
+
+                // Filled arc.
+                const p = a._gaugePercent / 100;
+                if (p > 0) {
+                    cr.setSourceRGB(a._gaugeColor[0], a._gaugeColor[1], a._gaugeColor[2]);
+                    cr.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + p * 2 * Math.PI);
+                    cr.lineTo(cx, cy);
+                    cr.fill();
+                }
+
+                cr.$dispose();
+            });
+
+            if (title && body) {
+                area.connect('button-press-event', () => {
+                    this._showExplanationOverlay(area, title, body);
+                    return Clutter.EVENT_STOP;
+                });
+            }
+
+            return area;
+        }
+
+        // -------------------------------------------------------------------
+        // Add a health gauge row: a camembert gauge + a value label.
+        // -------------------------------------------------------------------
+        _addGaugeLine(label, percent, color, title, body, styleClass = 'nvme-smart-attr') {
+            const item = new PopupBaseMenuItem({ reactive: false, can_focus: false });
+            const gauge = this._createGauge(percent, color, 22, title, body);
+            item.add_child(gauge);
+
+            const text = new St.Label({ text: `${label}: ${percent}%`, x_expand: true });
+            text.add_style_class_name(styleClass);
+            text.y_align = Clutter.ActorAlign.CENTER;
+            text.reactive = true;
+            text.connect('button-press-event', () => {
+                this._showExplanationOverlay(text, title, body);
+                return Clutter.EVENT_STOP;
+            });
+            item.add_child(text);
+
+            this._devicesSection.addMenuItem(item);
+        }
+
+        // -------------------------------------------------------------------
         // Parse SMART JSON and add structured sections to the device section.
         // Uses the modular parser (BaseParser / SamsungParser).
         // -------------------------------------------------------------------
@@ -662,13 +810,23 @@ const Indicator = GObject.registerClass(
             }
 
             // ---------------------------------------------------------------
-            // Health Section
+            // Health Section (camembert gauges)
             // ---------------------------------------------------------------
             if (smart.health.availableSparePercent !== undefined) {
-                this._addInfoLine(`  ${_('Available Spare')}: ${smart.health.availableSparePercent}%`, 'nvme-smart-attr');
+                const pct = smart.health.availableSparePercent;
+                this._addGaugeLine(
+                    _('Available Spare'), pct, spareGaugeColor(pct),
+                    _('Available Spare'),
+                    _('Reserved capacity the drive can swap in to replace failing blocks. ' +
+                      'Red below 15%, orange below 50%, green otherwise.'));
             }
             if (smart.health.percentageUsed !== undefined) {
-                this._addInfoLine(`  ${_('Percentage Used')}: ${smart.health.percentageUsed}%`, 'nvme-smart-attr');
+                const pct = smart.health.percentageUsed;
+                this._addGaugeLine(
+                    _('Percentage Used'), pct, usedGaugeColor(pct),
+                    _('Percentage Used'),
+                    _('Estimated portion of the drive endurance consumed. ' +
+                      'Green below 50%, orange up to 85%, red above (inverted logic).'));
             }
 
             // ---------------------------------------------------------------
@@ -856,6 +1014,7 @@ const Indicator = GObject.registerClass(
 
 
         destroy() {
+            this._hideExplanationOverlay();
             this._stopPolling();
             super.destroy();
         }
