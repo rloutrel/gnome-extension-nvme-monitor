@@ -53,3 +53,55 @@
     opacity: 0.5;
     font-style: italic;
 }
+
+/* Custom hover tooltip — mimics the GNOME Shell tooltip look. */
+.nvme-hover-tooltip {
+    border-radius: 8px;
+    padding: 6px 10px;
+    background-color: rgba(0, 0, 0, 0.85);
+    color: #ffffff;
+    font-size: 0.9em;
+}
+
+/* Click-to-explain overlay (title + body), transient. */
+.nvme-explain-overlay {
+    border-radius: 10px;
+    padding: 12px 14px;
+    spacing: 6px;
+    background-color: rgba(0, 0, 0, 0.9);
+    color: #ffffff;
+    max-width: 320px;
+}
+
+.nvme-explain-title {
+    font-weight: bold;
+    font-size: 1em;
+}
+
+.nvme-explain-body {
+    font-size: 0.9em;
+}
+
+/* Metric section: each half of the data/host line. */
+.nvme-metric-section {
+    spacing: 6px;
+}
+
+/* Section icon (database, arrow-left-right) at the start of a metric
+ * section — a small gap separates it from the read icon/value. */
+.nvme-metric-section-icon {
+    icon-size: 22px;
+    margin-right: 6px;
+}
+
+/* A single health-gauge segment: label + camembert diagram, placed on
+ * the right half of the device meta line. */
+.nvme-gauge-segment {
+    spacing: 6px;
+}
+
+/* Stack of health gauges (Available Spare over Percentage Used),
+ * one above the other, right-aligned on the right half of the meta line. */
+.nvme-gauge-stack {
+    spacing: 2px;
+}

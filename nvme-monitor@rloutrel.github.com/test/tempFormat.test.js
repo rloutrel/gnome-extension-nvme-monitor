@@ -101,6 +101,41 @@ test('no sensors produces no rows', () => {
     assert.deepStrictEqual(formatSensorRows('Unknown', []), []);
 });
 
+// ---------------------------------------------------------------------------
+// labels option — translated labels passed by the caller (extension.js)
+// ---------------------------------------------------------------------------
+test('translated labels are used when provided (Samsung)', () => {
+    const line = formatTemperatureLine('Samsung', 42, [41, 45], {
+        controller: 'Contrôleur',
+        nand: 'Mémoire',
+        sensor: 'Capteur',
+    });
+    assert.strictEqual(line, '42,0°C (Contrôleur: 41,0°C; Mémoire: 45,0°C)');
+});
+
+test('translated sensor label is used in generic detail', () => {
+    const line = formatTemperatureLine('WD', 42, [41, 45], { sensor: 'Capteur' });
+    assert.strictEqual(line, '42,0°C (Capteur 1: 41,0°C; Capteur 2: 45,0°C)');
+});
+
+test('translated labels are used in sensor rows', () => {
+    const rows = formatSensorRows('WD', [41, 45], { sensor: 'Capteur' });
+    assert.deepStrictEqual(rows, [
+        { text: '  Capteur 1: 41,0°C', temp: 41 },
+        { text: '  Capteur 2: 45,0°C', temp: 45 },
+    ]);
+});
+
+test('partial labels fall back to English defaults', () => {
+    const line = formatTemperatureLine('Samsung', 42, [41, 45], { controller: 'Contrôleur' });
+    assert.strictEqual(line, '42,0°C (Contrôleur: 41,0°C; NAND: 45,0°C)');
+});
+
+test('empty labels object falls back to English defaults', () => {
+    const line = formatTemperatureLine('Samsung', 42, [41, 45], {});
+    assert.strictEqual(line, '42,0°C (Controller: 41,0°C; NAND: 45,0°C)');
+});
+
 test('sensor rows preserve null temp for placeholder text', () => {
     const rows = formatSensorRows('WD', [null]);
     assert.deepStrictEqual(rows, [{ text: '  Sensor 1: ?°C', temp: null }]);

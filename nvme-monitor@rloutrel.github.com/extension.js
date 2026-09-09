@@ -3,6 +3,7 @@ import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import Cairo from 'cairo';
 
 import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -11,6 +12,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 // Import the SMART parser
 import { parseSmart } from './smartParser.js';
+// Import endurance value formatting (pure, unit-tested)
+import { formatCompactNumber, formatDataUnits, formatPowerOnHours, spareGaugeColor, usedGaugeColor, COLOR_TRACK } from './format.js';
 // Import temperature line formatting (pure, unit-tested)
 import { formatTemperatureLine, formatSensorRows } from './tempFormat.js';
 // Import nvme-cli version detection (pure, unit-tested)
@@ -73,6 +76,11 @@ const ICONS_DIR = 'icons';
 const ICONS_BOOTSTRAP = 'bootstrap';
 const ICON_EXTENSION = '.svg';
 
+// Leading section icons (plug, database, thermometer, device header) are
+// rendered larger than the per-value inline icons.
+const SECTION_ICON_SIZE = 22;
+const VALUE_ICON_SIZE = 16;
+
 // Temperature thresholds (°C) for the heuristic green/orange tiers.
 // The red tier is driven by the drive's own critical_warning signal, not a
 // guessed °C value (see CRITICAL_WARNING_TEMP). 70°C aligns with where most
@@ -93,6 +101,11 @@ const ICONS = Object.freeze({
     ThermometerLow: 'thermometer-low',
     ThermometerHalf: 'thermometer-half',
     ThermometerHigh: 'thermometer-high',
+    Plug: 'plugin',
+    Database: 'database',
+    ArrowLeftRight: 'arrow-left-right',
+    Eyeglasses: 'eyeglasses',
+    VectorPen: 'vector-pen',
     PanelFallback: 'drive-harddisk-symbolic',
 });
 
@@ -376,19 +389,60 @@ const Indicator = GObject.registerClass(
                 // Device header: icon + bold model name
                 this._addDeviceHeader(dev.ModelNumber || dev.DevicePath);
 
-                // Device path + firmware (dimmed)
-                this._addInfoLine(`${dev.DevicePath} — FW: ${dev.Firmware}`, 'nvme-device-meta');
-
-                // SMART data (requires polkit stack)
+                // SMART data (requires polkit stack). Fetched first so the
+                // health gauges (if any) can be placed on the meta line.
+                let smartObj = null;
+                let smartParseError = false;
                 if (v2Installed) {
                     const smartResult = runPkexecSync([WRAPPER_PATH, dev.DevicePath]);
                     if (smartResult.ok && smartResult.exitCode === 0) {
                         try {
-                            const smart = JSON.parse(smartResult.stdout);
-                            this._addSmartInfo(smart, dev.ModelNumber);
+                            smartObj = JSON.parse(smartResult.stdout);
                         } catch (e) {
-                            this._addInfoLine(_('  SMART: parse error'));
+                            smartParseError = true;
                         }
+                    }
+                }
+
+                // Extract health gauges from the parsed SMART object.
+                let healthGauges = null;
+                if (smartObj) {
+                    const smart = parseSmart(smartObj, dev.ModelNumber);
+                    const gauges = [];
+                    if (smart.health.availableSparePercent !== undefined) {
+                        const pct = smart.health.availableSparePercent;
+                        gauges.push({
+                            label: _('Available Spare'),
+                            percent: pct,
+                            color: spareGaugeColor(pct),
+                            title: _('Available Spare'),
+                            body: _('Reserved capacity the drive can swap in to replace failing blocks. ' +
+                                   'Red below 15%, orange below 50%, green otherwise.'),
+                        });
+                    }
+                    if (smart.health.percentageUsed !== undefined) {
+                        const pct = smart.health.percentageUsed;
+                        gauges.push({
+                            label: _('Percentage Used'),
+                            percent: pct,
+                            color: usedGaugeColor(pct),
+                            title: _('Percentage Used'),
+                            body: _('Estimated portion of the drive endurance consumed. ' +
+                                   'Green below 50%, orange up to 85%, red above (inverted logic).'),
+                        });
+                    }
+                    if (gauges.length > 0) healthGauges = gauges;
+                }
+
+                // Device path + firmware (dimmed), with the health gauges on
+                // the right half of the line when available.
+                this._addDeviceMeta(dev.DevicePath, dev.Firmware, healthGauges);
+
+                if (v2Installed) {
+                    if (smartParseError) {
+                        this._addInfoLine(_('  SMART: parse error'));
+                    } else if (smartObj) {
+                        this._addSmartInfo(smartObj, dev.ModelNumber);
                     } else {
                         this._addInfoLine(_('  SMART: unavailable'), 'nvme-smart-info');
                     }
@@ -407,7 +461,7 @@ const Indicator = GObject.registerClass(
             if (this._deviceIcon) {
                 header.add_child(new St.Icon({
                     gicon: this._deviceIcon,
-                    icon_size: 16,
+                    icon_size: SECTION_ICON_SIZE,
                 }));
             }
 
@@ -417,6 +471,61 @@ const Indicator = GObject.registerClass(
             header.add_child(label);
 
             this._devicesSection.addMenuItem(header);
+        }
+
+        // -------------------------------------------------------------------
+        // Add the device meta line: path + firmware (left, dimmed) with the
+        // health gauges (if any) on the right half. Each gauge is rendered
+        // as a label followed by the camembert diagram; the percent value is
+        // revealed on hover, not shown inline.
+        // -------------------------------------------------------------------
+        _addDeviceMeta(devicePath, firmware, gauges = null) {
+            const item = new PopupBaseMenuItem({ reactive: false, can_focus: false });
+
+            const meta = new St.Label({ text: `${devicePath} \u2014 FW: ${firmware}`, x_expand: true });
+            meta.add_style_class_name('nvme-device-meta');
+            meta.y_align = Clutter.ActorAlign.CENTER;
+            item.add_child(meta);
+
+            if (gauges && gauges.length > 0) {
+                const right = new St.BoxLayout({
+                    vertical: true,
+                    x_expand: true,
+                    x_align: Clutter.ActorAlign.END,
+                    y_align: Clutter.ActorAlign.CENTER,
+                    style_class: 'nvme-gauge-stack',
+                });
+                for (const g of gauges) {
+                    right.add_child(this._gaugeSegment(g));
+                }
+                item.add_child(right);
+            }
+
+            this._devicesSection.addMenuItem(item);
+        }
+
+        // -------------------------------------------------------------------
+        // Build a single gauge segment: a label followed by the camembert
+        // diagram. The percent value is revealed on hover.
+        // -------------------------------------------------------------------
+        _gaugeSegment(g) {
+            const box = new St.BoxLayout({ x_align: Clutter.ActorAlign.END, style_class: 'nvme-gauge-segment' });
+
+            const label = new St.Label({ text: g.label, y_align: Clutter.ActorAlign.CENTER });
+            label.add_style_class_name('nvme-smart-attr');
+            label.reactive = true;
+            this._attachHoverTooltip(label, `${g.label}: ${g.percent}%`);
+            label.connect('button-press-event', () => {
+                this._showExplanationOverlay(label, g.title, g.body);
+                return Clutter.EVENT_STOP;
+            });
+            box.add_child(label);
+
+            const gauge = this._createGauge(
+                g.percent, g.color, 22, g.title, g.body, `${g.label}: ${g.percent}%`);
+            box.add_child(gauge);
+
+            return box;
         }
 
         // -------------------------------------------------------------------
@@ -464,9 +573,9 @@ const Indicator = GObject.registerClass(
             if (styleClass && item.label) {
                 item.label.add_style_class_name(styleClass);
             }
-            // Prepend icon if provided
+            // Prepend section icon (larger) if provided
             if (iconName) {
-                const icon = this._createIcon(iconName);
+                const icon = this._createIcon(iconName, SECTION_ICON_SIZE);
                 // Insert icon at the beginning of the item's children
                 const children = item.get_children();
                 if (children.length > 0) {
@@ -478,6 +587,119 @@ const Indicator = GObject.registerClass(
                     item.add_child(icon);
                 }
             }
+            this._devicesSection.addMenuItem(item);
+        }
+
+        // -------------------------------------------------------------------
+        // Attach a custom hover tooltip to an actor. GNOME 50/51 St.Widget has
+        // no native tooltip API, so this connects enter/leave/destroy events
+        // and shows a transient St.Label in Main.uiGroup near the actor.
+        // `text` is the raw value revealed on hover. Handlers are stored on the
+        // actor for cleanup.
+        // -------------------------------------------------------------------
+        _attachHoverTooltip(actor, text) {
+            if (!actor) return;
+            actor._nvmeTooltipText = text;
+            actor._nvmeTooltip = null;
+
+            const _showTooltip = (a) => {
+                if (a._nvmeTooltip || !a._nvmeTooltipText) return;
+                const label = new St.Label({
+                    text: a._nvmeTooltipText,
+                    style_class: 'nvme-hover-tooltip',
+                });
+                Main.uiGroup.add_child(label);
+                a._nvmeTooltip = label;
+
+                const [stageX, stageY] = a.get_transformed_position();
+                const [, h] = a.get_size();
+                // Position below the actor, left-aligned to its left edge.
+                let x = Math.round(stageX);
+                let y = Math.round(stageY + h + 6);
+                // Keep the tooltip on the current monitor.
+                const idx = Main.layoutManager.find_index_for_actor(a);
+                const area = Main.layoutManager.monitors[idx];
+                if (area) {
+                    const [, natWidth] = label.get_preferred_width(-1);
+                    x = Math.max(area.x, Math.min(x, area.x + area.width - natWidth));
+                    if (y + 40 > area.y + area.height) {
+                        y = Math.round(stageY) - 6 - 24;
+                    }
+                }
+                label.set_position(x, y);
+            };
+
+            const _hideTooltip = (a) => {
+                if (a._nvmeTooltip) {
+                    a._nvmeTooltip.destroy();
+                    a._nvmeTooltip = null;
+                }
+            };
+
+            const enterId = actor.connect('enter-event', () => _showTooltip(actor));
+            const leaveId = actor.connect('leave-event', () => _hideTooltip(actor));
+            const destroyId = actor.connect('destroy', () => _hideTooltip(actor));
+            actor._nvmeTooltipHandlers = [enterId, leaveId, destroyId];
+        }
+
+        // -------------------------------------------------------------------
+        // Add a non-interactive line of icon+value segments, each with a
+        // hover tooltip revealing the raw value. Segments are grouped into
+        // sections by `sectionIcon`; the line width is distributed evenly
+        // across the sections, and within a section the subsections (icon +
+        // value pairs) are laid out. Each segment is
+        // { iconName, value, tooltip?, sectionIcon? }.
+        // -------------------------------------------------------------------
+        _addMetricSegmentsLine(segments, styleClass = 'nvme-smart-attr') {
+            if (!segments || segments.length === 0) return;
+
+            // Group segments into consecutive sections. A segment starts a
+            // new section when it carries a `sectionIcon`.
+            const sections = [];
+            for (const seg of segments) {
+                if (seg.sectionIcon || sections.length === 0) {
+                    sections.push({ sectionIcon: seg.sectionIcon || null, items: [seg] });
+                } else {
+                    sections[sections.length - 1].items.push(seg);
+                }
+            }
+
+            const item = new PopupBaseMenuItem({ reactive: false, can_focus: false });
+
+            for (let s = 0; s < sections.length; s++) {
+                const section = sections[s];
+                const box = new St.BoxLayout({ x_expand: true, x_align: Clutter.ActorAlign.START });
+
+                if (section.sectionIcon) {
+                    box.add_child(this._createIcon(section.sectionIcon, SECTION_ICON_SIZE, 'nvme-metric-section-icon'));
+                }
+
+                const subBox = new St.BoxLayout({ x_expand: true, x_align: Clutter.ActorAlign.CENTER, style_class: 'nvme-metric-section' });
+                box.add_child(subBox);
+
+                for (let i = 0; i < section.items.length; i++) {
+                    const seg = section.items[i];
+
+                    const iconActor = this._createIcon(seg.iconName, VALUE_ICON_SIZE, 'nvme-info-icon');
+                    if (seg.tooltip) {
+                        iconActor.reactive = true;
+                        this._attachHoverTooltip(iconActor, seg.tooltip);
+                    }
+                    subBox.add_child(iconActor);
+
+                    const valueLabel = new St.Label({ text: seg.value, x_expand: true });
+                    valueLabel.add_style_class_name(styleClass);
+                    valueLabel.y_align = Clutter.ActorAlign.CENTER;
+                    if (seg.tooltip) {
+                        valueLabel.reactive = true;
+                        this._attachHoverTooltip(valueLabel, seg.tooltip);
+                    }
+                    subBox.add_child(valueLabel);
+                }
+
+                item.add_child(box);
+            }
+
             this._devicesSection.addMenuItem(item);
         }
 
@@ -525,6 +747,123 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
+        // Show a click-triggered explanation overlay near `actor`. It is a
+        // transient St.BoxLayout (title + body) in Main.uiGroup, dismissed
+        // by the next pointer click anywhere on the stage.
+        // -------------------------------------------------------------------
+        _showExplanationOverlay(actor, title, body) {
+            this._hideExplanationOverlay();
+
+            const box = new St.BoxLayout({
+                vertical: true,
+                style_class: 'nvme-explain-overlay',
+                x_expand: false,
+            });
+            const titleLabel = new St.Label({ text: title, style_class: 'nvme-explain-title' });
+            titleLabel.clutter_text.line_wrap = true;
+            const bodyLabel = new St.Label({ text: body, style_class: 'nvme-explain-body' });
+            bodyLabel.clutter_text.line_wrap = true;
+            box.add_child(titleLabel);
+            box.add_child(bodyLabel);
+
+            Main.uiGroup.add_child(box);
+            this._explainOverlay = box;
+
+            const [stageX, stageY] = actor.get_transformed_position();
+            const [, h] = actor.get_size();
+            let x = Math.round(stageX);
+            let y = Math.round(stageY + h + 6);
+            const idx = Main.layoutManager.find_index_for_actor(actor);
+            const area = Main.layoutManager.monitors[idx];
+            if (area) {
+                const [, natWidth] = box.get_preferred_width(-1);
+                const [, natHeight] = box.get_preferred_height(-1);
+                x = Math.max(area.x, Math.min(x, area.x + area.width - natWidth));
+                if (y + natHeight > area.y + area.height) {
+                    y = Math.round(stageY) - 6 - natHeight;
+                }
+            }
+            box.set_position(x, y);
+
+            this._explainClickId = global.stage.connect('button-press-event', () => {
+                this._hideExplanationOverlay();
+                return Clutter.EVENT_PROPAGATE;
+            });
+        }
+
+        _hideExplanationOverlay() {
+            if (this._explainClickId) {
+                global.stage.disconnect(this._explainClickId);
+                this._explainClickId = null;
+            }
+            if (this._explainOverlay) {
+                this._explainOverlay.destroy();
+                this._explainOverlay = null;
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Build a circular "camembert" gauge: a pie whose filled arc is
+        // `percent` of a full circle, colored by `color` ([r,g,b]). The rest
+        // of the ring uses the dim track color, and the whole circle gets a
+        // thin black outline. Hovering reveals `tooltipText` (the percent);
+        // clicking shows an explanation overlay (title/body).
+        // -------------------------------------------------------------------
+        _createGauge(percent, color, size, title, body, tooltipText = null) {
+            const area = new St.DrawingArea({
+                width: size,
+                height: size,
+                reactive: true,
+                can_focus: true,
+                track_hover: true,
+            });
+            area._gaugePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+            area._gaugeColor = color;
+
+            area.connect('repaint', (a) => {
+                const cr = a.get_context();
+                const [w, h] = a.get_surface_size();
+                const cx = w / 2;
+                const cy = h / 2;
+                const r = Math.min(w, h) / 2 - 1;
+
+                // Track (full ring background).
+                cr.setSourceRGB(COLOR_TRACK[0], COLOR_TRACK[1], COLOR_TRACK[2]);
+                cr.arc(cx, cy, r, 0, 2 * Math.PI);
+                cr.fill();
+
+                // Filled arc.
+                const p = a._gaugePercent / 100;
+                if (p > 0) {
+                    cr.setSourceRGB(a._gaugeColor[0], a._gaugeColor[1], a._gaugeColor[2]);
+                    cr.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + p * 2 * Math.PI);
+                    cr.lineTo(cx, cy);
+                    cr.fill();
+                }
+
+                // Thin black outline.
+                cr.setSourceRGB(0, 0, 0);
+                cr.setLineWidth(1);
+                cr.arc(cx, cy, r, 0, 2 * Math.PI);
+                cr.stroke();
+
+                cr.$dispose();
+            });
+
+            if (tooltipText) {
+                this._attachHoverTooltip(area, tooltipText);
+            }
+            if (title && body) {
+                area.connect('button-press-event', () => {
+                    this._showExplanationOverlay(area, title, body);
+                    return Clutter.EVENT_STOP;
+                });
+            }
+
+            return area;
+        }
+
+        // -------------------------------------------------------------------
         // Parse SMART JSON and add structured sections to the device section.
         // Uses the modular parser (BaseParser / SamsungParser).
         // -------------------------------------------------------------------
@@ -540,15 +879,21 @@ const Indicator = GObject.registerClass(
                 const icon = this._getThermometerIcon(smart.temperature.composite, cw);
                 const style = this._getTempStyle(smart.temperature.composite, cw);
 
+                const tempLabels = {
+                    controller: _('Controller'),
+                    nand: _('NAND'),
+                    sensor: _('Sensor'),
+                };
                 const line = formatTemperatureLine(
                     manuf,
                     smart.temperature.composite,
-                    smart.temperature.sensors
+                    smart.temperature.sensors,
+                    tempLabels
                 );
                 this._addInfoLine(line, style, icon);
 
                 // Additional sensors as separate rows (non-Samsung only).
-                for (const row of formatSensorRows(manuf, smart.temperature.sensors)) {
+                for (const row of formatSensorRows(manuf, smart.temperature.sensors, tempLabels)) {
                     const sensorIcon = this._getThermometerIcon(row.temp, cw);
                     const sensorStyle = this._getTempStyle(row.temp, cw);
                     this._addInfoLine(row.text, sensorStyle, sensorIcon);
@@ -556,43 +901,65 @@ const Indicator = GObject.registerClass(
             }
 
             // ---------------------------------------------------------------
-            // Health Section
-            // ---------------------------------------------------------------
-            if (smart.health.availableSparePercent !== undefined) {
-                this._addInfoLine(`  ${_('Available Spare')}: ${smart.health.availableSparePercent}%`, 'nvme-smart-attr');
-            }
-            if (smart.health.percentageUsed !== undefined) {
-                this._addInfoLine(`  ${_('Percentage Used')}: ${smart.health.percentageUsed}%`, 'nvme-smart-attr');
-            }
-
-            // ---------------------------------------------------------------
             // Endurance Section
             // ---------------------------------------------------------------
+            // Power line: cycles (human-readable) · hours (human-readable) ·
+            // unsafe shutdowns. Raw value revealed on hover via tooltip.
+            const powerParts = [];
             if (smart.endurance.powerCycles !== undefined) {
-                this._addInfoLine(`  ${_('Power Cycles')}: ${smart.endurance.powerCycles}`, 'nvme-smart-attr');
+                powerParts.push(_('Power Cycles') + ': ' +
+                    smart.endurance.powerCycles.toLocaleString('en-US'));
             }
             if (smart.endurance.powerOnHours !== undefined) {
-                this._addInfoLine(`  ${_('Power On Hours')}: ${smart.endurance.powerOnHours}h`, 'nvme-smart-attr');
-            }
-            if (smart.endurance.dataUnitsRead !== undefined) {
-                this._addInfoLine(`  ${_('Data Read')}: ${smart.endurance.dataUnitsRead} units`, 'nvme-smart-attr');
-            }
-            if (smart.endurance.dataUnitsWritten !== undefined) {
-                this._addInfoLine(`  ${_('Data Written')}: ${smart.endurance.dataUnitsWritten} units`, 'nvme-smart-attr');
+                powerParts.push(_('Power On') + ': ' +
+                    formatPowerOnHours(smart.endurance.powerOnHours));
             }
             if (smart.endurance.unsafeShutdowns !== undefined) {
-                this._addInfoLine(`  ${_('Unsafe Shutdowns')}: ${smart.endurance.unsafeShutdowns}`, 'nvme-smart-attr');
+                powerParts.push(`${_('Unsafe Shutdowns')}: ${smart.endurance.unsafeShutdowns}`);
+            }
+            if (powerParts.length > 0) {
+                this._addInfoLine(`  ${powerParts.join(' · ')}`, 'nvme-smart-attr', ICONS.Plug);
             }
 
-            // Samsung-specific: host reads/writes
+            // Data + Host on a single line. Each group keeps its own section
+            // icon: database for data units, arrow-left-right for host
+            // commands (Samsung). Read uses the eyeglasses icon, write uses
+            // the vector-pen icon. The human-readable value is shown; the raw
+            // value is revealed on hover.
+            const segments = [];
+            if (smart.endurance.dataUnitsRead !== undefined) {
+                segments.push({
+                    sectionIcon: ICONS.Database,
+                    iconName: ICONS.Eyeglasses,
+                    value: formatDataUnits(smart.endurance.dataUnitsRead),
+                    tooltip: `${_('Data Read')}: ${smart.endurance.dataUnitsRead} units`,
+                });
+            }
+            if (smart.endurance.dataUnitsWritten !== undefined) {
+                segments.push({
+                    iconName: ICONS.VectorPen,
+                    value: formatDataUnits(smart.endurance.dataUnitsWritten),
+                    tooltip: `${_('Data Written')}: ${smart.endurance.dataUnitsWritten} units`,
+                });
+            }
             if (manuf === 'Samsung') {
                 if (smart.endurance.hostReads !== undefined) {
-                    this._addInfoLine(`  ${_('Host Reads')}: ${smart.endurance.hostReads}`, 'nvme-smart-attr');
+                    segments.push({
+                        sectionIcon: ICONS.ArrowLeftRight,
+                        iconName: ICONS.Eyeglasses,
+                        value: formatCompactNumber(smart.endurance.hostReads),
+                        tooltip: `${_('Host Reads')}: ${smart.endurance.hostReads.toLocaleString('en-US')}`,
+                    });
                 }
                 if (smart.endurance.hostWrites !== undefined) {
-                    this._addInfoLine(`  ${_('Host Writes')}: ${smart.endurance.hostWrites}`, 'nvme-smart-attr');
+                    segments.push({
+                        iconName: ICONS.VectorPen,
+                        value: formatCompactNumber(smart.endurance.hostWrites),
+                        tooltip: `${_('Host Writes')}: ${smart.endurance.hostWrites.toLocaleString('en-US')}`,
+                    });
                 }
             }
+            this._addMetricSegmentsLine(segments);
 
             // ---------------------------------------------------------------
             // Alerts Section
@@ -718,12 +1085,18 @@ const Indicator = GObject.registerClass(
 
 
         destroy() {
+            this._hideExplanationOverlay();
             this._stopPolling();
             super.destroy();
         }
     });
 
 export default class IndicatorExampleExtension extends Extension {
+    constructor(metadata) {
+        super(metadata);
+        this.initTranslations();
+    }
+
     enable() {
         _debug('enable() enter');
         this._indicator = new Indicator();
