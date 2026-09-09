@@ -93,6 +93,9 @@ const ICONS = Object.freeze({
     ThermometerLow: 'thermometer-low',
     ThermometerHalf: 'thermometer-half',
     ThermometerHigh: 'thermometer-high',
+    Plug: 'plug',
+    Database: 'database',
+    ArrowLeftRight: 'arrow-left-right',
     PanelFallback: 'drive-harddisk-symbolic',
 });
 
@@ -566,31 +569,43 @@ const Indicator = GObject.registerClass(
             }
 
             // ---------------------------------------------------------------
-            // Endurance Section
+            // Endurance Section (compact: one line per metric group)
             // ---------------------------------------------------------------
+            const powerParts = [];
             if (smart.endurance.powerCycles !== undefined) {
-                this._addInfoLine(`  ${_('Power Cycles')}: ${smart.endurance.powerCycles}`, 'nvme-smart-attr');
+                powerParts.push(`${_('Power Cycles')}: ${smart.endurance.powerCycles}`);
             }
             if (smart.endurance.powerOnHours !== undefined) {
-                this._addInfoLine(`  ${_('Power On Hours')}: ${smart.endurance.powerOnHours}h`, 'nvme-smart-attr');
-            }
-            if (smart.endurance.dataUnitsRead !== undefined) {
-                this._addInfoLine(`  ${_('Data Read')}: ${smart.endurance.dataUnitsRead} units`, 'nvme-smart-attr');
-            }
-            if (smart.endurance.dataUnitsWritten !== undefined) {
-                this._addInfoLine(`  ${_('Data Written')}: ${smart.endurance.dataUnitsWritten} units`, 'nvme-smart-attr');
+                powerParts.push(`${_('Power On Hours')}: ${smart.endurance.powerOnHours}h`);
             }
             if (smart.endurance.unsafeShutdowns !== undefined) {
-                this._addInfoLine(`  ${_('Unsafe Shutdowns')}: ${smart.endurance.unsafeShutdowns}`, 'nvme-smart-attr');
+                powerParts.push(`${_('Unsafe Shutdowns')}: ${smart.endurance.unsafeShutdowns}`);
+            }
+            if (powerParts.length > 0) {
+                this._addInfoLine(`  ${powerParts.join(' · ')}`, 'nvme-smart-attr', ICONS.Plug);
             }
 
-            // Samsung-specific: host reads/writes
+            const dataParts = [];
+            if (smart.endurance.dataUnitsRead !== undefined) {
+                dataParts.push(`${_('Data Read')}: ${smart.endurance.dataUnitsRead} units`);
+            }
+            if (smart.endurance.dataUnitsWritten !== undefined) {
+                dataParts.push(`${_('Data Written')}: ${smart.endurance.dataUnitsWritten} units`);
+            }
+            if (dataParts.length > 0) {
+                this._addInfoLine(`  ${dataParts.join(' · ')}`, 'nvme-smart-attr', ICONS.Database);
+            }
+
             if (manuf === 'Samsung') {
+                const hostParts = [];
                 if (smart.endurance.hostReads !== undefined) {
-                    this._addInfoLine(`  ${_('Host Reads')}: ${smart.endurance.hostReads}`, 'nvme-smart-attr');
+                    hostParts.push(`${_('Host Reads')}: ${smart.endurance.hostReads}`);
                 }
                 if (smart.endurance.hostWrites !== undefined) {
-                    this._addInfoLine(`  ${_('Host Writes')}: ${smart.endurance.hostWrites}`, 'nvme-smart-attr');
+                    hostParts.push(`${_('Host Writes')}: ${smart.endurance.hostWrites}`);
+                }
+                if (hostParts.length > 0) {
+                    this._addInfoLine(`  ${hostParts.join(' · ')}`, 'nvme-smart-attr', ICONS.ArrowLeftRight);
                 }
             }
 
