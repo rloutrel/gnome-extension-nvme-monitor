@@ -345,7 +345,7 @@ const Indicator = GObject.registerClass(
                     if (smartResult.ok && smartResult.exitCode === 0) {
                         try {
                             const smart = JSON.parse(smartResult.stdout);
-                            this._addSmartInfo(smart);
+                            this._addSmartInfo(smart, dev.ModelNumber);
                         } catch (e) {
                             this._addInfoLine(_('  SMART: parse error'));
                         }
@@ -488,8 +488,8 @@ const Indicator = GObject.registerClass(
         // Parse SMART JSON and add structured sections to the device section.
         // Uses the modular parser (BaseParser / SamsungParser).
         // -------------------------------------------------------------------
-        _addSmartInfo(smartRaw) {
-            const smart = parseSmart(smartRaw);
+        _addSmartInfo(smartRaw, modelHint = null) {
+            const smart = parseSmart(smartRaw, modelHint);
             const manuf = smart.manufacturer;
 
             // ---------------------------------------------------------------
