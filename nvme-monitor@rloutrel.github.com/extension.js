@@ -389,19 +389,60 @@ const Indicator = GObject.registerClass(
                 // Device header: icon + bold model name
                 this._addDeviceHeader(dev.ModelNumber || dev.DevicePath);
 
-                // Device path + firmware (dimmed)
-                this._addInfoLine(`${dev.DevicePath} — FW: ${dev.Firmware}`, 'nvme-device-meta');
-
-                // SMART data (requires polkit stack)
+                // SMART data (requires polkit stack). Fetched first so the
+                // health gauges (if any) can be placed on the meta line.
+                let smartObj = null;
+                let smartParseError = false;
                 if (v2Installed) {
                     const smartResult = runPkexecSync([WRAPPER_PATH, dev.DevicePath]);
                     if (smartResult.ok && smartResult.exitCode === 0) {
                         try {
-                            const smart = JSON.parse(smartResult.stdout);
-                            this._addSmartInfo(smart, dev.ModelNumber);
+                            smartObj = JSON.parse(smartResult.stdout);
                         } catch (e) {
-                            this._addInfoLine(_('  SMART: parse error'));
+                            smartParseError = true;
                         }
+                    }
+                }
+
+                // Extract health gauges from the parsed SMART object.
+                let healthGauges = null;
+                if (smartObj) {
+                    const smart = parseSmart(smartObj, dev.ModelNumber);
+                    const gauges = [];
+                    if (smart.health.availableSparePercent !== undefined) {
+                        const pct = smart.health.availableSparePercent;
+                        gauges.push({
+                            label: _('Available Spare'),
+                            percent: pct,
+                            color: spareGaugeColor(pct),
+                            title: _('Available Spare'),
+                            body: _('Reserved capacity the drive can swap in to replace failing blocks. ' +
+                                   'Red below 15%, orange below 50%, green otherwise.'),
+                        });
+                    }
+                    if (smart.health.percentageUsed !== undefined) {
+                        const pct = smart.health.percentageUsed;
+                        gauges.push({
+                            label: _('Percentage Used'),
+                            percent: pct,
+                            color: usedGaugeColor(pct),
+                            title: _('Percentage Used'),
+                            body: _('Estimated portion of the drive endurance consumed. ' +
+                                   'Green below 50%, orange up to 85%, red above (inverted logic).'),
+                        });
+                    }
+                    if (gauges.length > 0) healthGauges = gauges;
+                }
+
+                // Device path + firmware (dimmed), with the health gauges on
+                // the right half of the line when available.
+                this._addDeviceMeta(dev.DevicePath, dev.Firmware, healthGauges);
+
+                if (v2Installed) {
+                    if (smartParseError) {
+                        this._addInfoLine(_('  SMART: parse error'));
+                    } else if (smartObj) {
+                        this._addSmartInfo(smartObj, dev.ModelNumber);
                     } else {
                         this._addInfoLine(_('  SMART: unavailable'), 'nvme-smart-info');
                     }
@@ -430,6 +471,55 @@ const Indicator = GObject.registerClass(
             header.add_child(label);
 
             this._devicesSection.addMenuItem(header);
+        }
+
+        // -------------------------------------------------------------------
+        // Add the device meta line: path + firmware (left, dimmed) with the
+        // health gauges (if any) on the right half. Each gauge is rendered
+        // as a label followed by the camembert diagram; the percent value is
+        // revealed on hover, not shown inline.
+        // -------------------------------------------------------------------
+        _addDeviceMeta(devicePath, firmware, gauges = null) {
+            const item = new PopupBaseMenuItem({ reactive: false, can_focus: false });
+
+            const meta = new St.Label({ text: `${devicePath} \u2014 FW: ${firmware}`, x_expand: true });
+            meta.add_style_class_name('nvme-device-meta');
+            meta.y_align = Clutter.ActorAlign.CENTER;
+            item.add_child(meta);
+
+            if (gauges && gauges.length > 0) {
+                const right = new St.BoxLayout({ x_expand: true, x_align: Clutter.ActorAlign.END });
+                for (const g of gauges) {
+                    right.add_child(this._gaugeSegment(g));
+                }
+                item.add_child(right);
+            }
+
+            this._devicesSection.addMenuItem(item);
+        }
+
+        // -------------------------------------------------------------------
+        // Build a single gauge segment: a label followed by the camembert
+        // diagram. The percent value is revealed on hover.
+        // -------------------------------------------------------------------
+        _gaugeSegment(g) {
+            const box = new St.BoxLayout({ x_align: Clutter.ActorAlign.END, style_class: 'nvme-gauge-segment' });
+
+            const label = new St.Label({ text: g.label, y_align: Clutter.ActorAlign.CENTER });
+            label.add_style_class_name('nvme-smart-attr');
+            label.reactive = true;
+            this._attachHoverTooltip(label, `${g.label}: ${g.percent}%`);
+            label.connect('button-press-event', () => {
+                this._showExplanationOverlay(label, g.title, g.body);
+                return Clutter.EVENT_STOP;
+            });
+            box.add_child(label);
+
+            const gauge = this._createGauge(
+                g.percent, g.color, 22, g.title, g.body, `${g.label}: ${g.percent}%`);
+            box.add_child(gauge);
+
+            return box;
         }
 
         // -------------------------------------------------------------------
@@ -707,12 +797,13 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
-        // Build a circular "camembert" gauge: a donut whose filled arc is
+        // Build a circular "camembert" gauge: a pie whose filled arc is
         // `percent` of a full circle, colored by `color` ([r,g,b]). The rest
-        // of the ring uses the dim track color. Clicking the gauge shows an
-        // explanation overlay (title/body).
+        // of the ring uses the dim track color, and the whole circle gets a
+        // thin black outline. Hovering reveals `tooltipText` (the percent);
+        // clicking shows an explanation overlay (title/body).
         // -------------------------------------------------------------------
-        _createGauge(percent, color, size, title, body) {
+        _createGauge(percent, color, size, title, body, tooltipText = null) {
             const area = new St.DrawingArea({
                 width: size,
                 height: size,
@@ -744,9 +835,18 @@ const Indicator = GObject.registerClass(
                     cr.fill();
                 }
 
+                // Thin black outline.
+                cr.setSourceRGB(0, 0, 0);
+                cr.setLineWidth(1);
+                cr.arc(cx, cy, r, 0, 2 * Math.PI);
+                cr.stroke();
+
                 cr.$dispose();
             });
 
+            if (tooltipText) {
+                this._attachHoverTooltip(area, tooltipText);
+            }
             if (title && body) {
                 area.connect('button-press-event', () => {
                     this._showExplanationOverlay(area, title, body);
@@ -755,27 +855,6 @@ const Indicator = GObject.registerClass(
             }
 
             return area;
-        }
-
-        // -------------------------------------------------------------------
-        // Add a health gauge row: a camembert gauge + a value label.
-        // -------------------------------------------------------------------
-        _addGaugeLine(label, percent, color, title, body, styleClass = 'nvme-smart-attr') {
-            const item = new PopupBaseMenuItem({ reactive: false, can_focus: false });
-            const gauge = this._createGauge(percent, color, 22, title, body);
-            item.add_child(gauge);
-
-            const text = new St.Label({ text: `${label}: ${percent}%`, x_expand: true });
-            text.add_style_class_name(styleClass);
-            text.y_align = Clutter.ActorAlign.CENTER;
-            text.reactive = true;
-            text.connect('button-press-event', () => {
-                this._showExplanationOverlay(text, title, body);
-                return Clutter.EVENT_STOP;
-            });
-            item.add_child(text);
-
-            this._devicesSection.addMenuItem(item);
         }
 
         // -------------------------------------------------------------------
@@ -807,26 +886,6 @@ const Indicator = GObject.registerClass(
                     const sensorStyle = this._getTempStyle(row.temp, cw);
                     this._addInfoLine(row.text, sensorStyle, sensorIcon);
                 }
-            }
-
-            // ---------------------------------------------------------------
-            // Health Section (camembert gauges)
-            // ---------------------------------------------------------------
-            if (smart.health.availableSparePercent !== undefined) {
-                const pct = smart.health.availableSparePercent;
-                this._addGaugeLine(
-                    _('Available Spare'), pct, spareGaugeColor(pct),
-                    _('Available Spare'),
-                    _('Reserved capacity the drive can swap in to replace failing blocks. ' +
-                      'Red below 15%, orange below 50%, green otherwise.'));
-            }
-            if (smart.health.percentageUsed !== undefined) {
-                const pct = smart.health.percentageUsed;
-                this._addGaugeLine(
-                    _('Percentage Used'), pct, usedGaugeColor(pct),
-                    _('Percentage Used'),
-                    _('Estimated portion of the drive endurance consumed. ' +
-                      'Green below 50%, orange up to 85%, red above (inverted logic).'));
             }
 
             // ---------------------------------------------------------------

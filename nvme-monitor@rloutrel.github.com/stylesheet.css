@@ -86,3 +86,9 @@
 .nvme-metric-section {
     spacing: 6px;
 }
+
+/* A single health-gauge segment: label + camembert diagram, placed on
+ * the right half of the device meta line. */
+.nvme-gauge-segment {
+    spacing: 6px;
+}
