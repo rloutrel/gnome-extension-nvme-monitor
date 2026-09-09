@@ -1,1 +1,60 @@
-/* Add your custom extension styling here */
+/* ---------------------------------------------------------------------------
+ * NVMe Monitor extension stylesheet
+ *
+ * Uses theme-aware color variables from the GNOME Shell theme so that
+ * colors adapt automatically to dark/light mode.  No hardcoded colors.
+ * ---------------------------------------------------------------------------
+ */
+
+/* Panel icon comparison: side-by-side */
+.nvme-icon-compare {
+    spacing: 4px;
+}
+
+/* Info line icon */
+.nvme-info-icon {
+    icon-size: 16px;
+}
+
+/* Device header — bold model name */
+.nvme-device-header {
+    font-weight: bold;
+    font-size: 1.05em;
+}
+
+/* Device meta line — path + firmware (dimmed) */
+.nvme-device-meta {
+    font-size: 0.9em;
+    opacity: 0.6;
+}
+
+/* SMART attribute lines */
+.nvme-smart-attr {
+    font-size: 0.95em;
+}
+
+/* Temperature warning — dark orange (40-60°C) */
+.nvme-smart-warning-orange {
+    font-size: 0.95em;
+    color: #e07b24;
+}
+
+/* Temperature warning — dark red (≥60°C) */
+.nvme-smart-warning-red {
+    font-size: 0.95em;
+    color: #c01c24;
+}
+
+/* SMART warning — used for critical_warning, media_errors */
+.nvme-smart-warning {
+    font-size: 0.95em;
+    font-weight: bold;
+    color: #e01b24;
+}
+
+/* SMART info message — "Install NVMe Stack for SMART data" */
+.nvme-smart-info {
+    font-size: 0.9em;
+    opacity: 0.5;
+    font-style: italic;
+}

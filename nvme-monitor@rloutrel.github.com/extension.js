@@ -1,38 +1,72 @@
 import GObject from 'gi://GObject';
 import St from 'gi://St';
-import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
 import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
-import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import {PopupBaseMenuItem, PopupMenuItem, PopupSwitchMenuItem, PopupSeparatorMenuItem, PopupMenuSection} from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-// Import Switch from GNOME Shell UI - using synchronous import
-let Switch = null;
-try {
-    // In GNOME Shell, Switch is available from the internal modules
-    Switch = imports.ui.switch.Switch;
-} catch (e) {
-    try {
-        // Try alternative path
-        Switch = imports.misc.switch.Switch;
-    } catch (e2) {
-        try {
-            Switch = new Gtk.Switch();
-            Switch.connect("state-set", (sw, state) => {
-                console.log("Nouvel état :", state);
-            });
-        } catch (e2) {
-            console.log('[explore-ui] Shell Switch module not found, falling back to text toggles');
+// Import the SMART parser
+import { parseSmart } from './smartParser.js';
+
+// ---------------------------------------------------------------------------
+// Unified logger + simple loop detector.
+//
+
+const LOG_PREFIX = '[NVMe-monitor]';
+const LOOP_THRESHOLD = 20;          // max 20 log lines per second
+const LOOP_WINDOW_US = 1_000_000;   // 1 second in microseconds
+const LOOP_CONTEXT_LINES = 10;      // lines to dump when loop detected
+
+// Global fail counter — incremented each time "Uninstall script not found"
+// is reached.  When it reaches KILL_THRESHOLD, the extension disables itself
+// to break the infinite toggle loop.
+const KILL_THRESHOLD = 4;
+let _uninstallNotFoundCount = 0;
+
+const _logTimestamps = [];  // sliding window of timestamps (microseconds)
+const _logRecent = [];      // recent messages for context dump
+let _loopDetected = false;
+
+function _log(message) {
+    const text = `${LOG_PREFIX} ${message}`;
+    console.log(text);
+
+    if (_loopDetected) return;
+
+    const ts = GLib.get_monotonic_time(); // microseconds
+
+    // Sliding window: remove timestamps older than 1 second.
+    while (_logTimestamps.length > 0 && (ts - _logTimestamps[0]) > LOOP_WINDOW_US) {
+        _logTimestamps.shift();
+    }
+    _logTimestamps.push(ts);
+
+    // Keep recent messages for context.
+    _logRecent.push(message);
+    if (_logRecent.length > LOOP_CONTEXT_LINES) {
+        _logRecent.shift();
+    }
+
+    // Detect: too many calls in 1 second → loop.
+    if (_logTimestamps.length > LOOP_THRESHOLD) {
+        _loopDetected = true;
+        console.log(`${LOG_PREFIX} ⛔ LOOP DETECTED — ${_logTimestamps.length} log calls in 1 second.`);
+        console.log(`${LOG_PREFIX} ⛔ Last ${_logRecent.length} messages before detection:`);
+        for (let i = 0; i < _logRecent.length; i++) {
+            console.log(`${LOG_PREFIX} ⛔   [${i + 1}] ${_logRecent[i]}`);
         }
+        Main.notify(`NVMe Monitor: boucle détectée — ${_logTimestamps.length} appels/seconde. Voir les logs.`);
+        return;
     }
 }
 
-function logAndNotify(message) {
-    console.log(`[explore-ui] ${message}`);
-    Main.notify(message);
+function logAndNotify(title, body) {
+    _log(`${title}${body ? ' — ' + body : ''}`);
+    Main.notify(title, body || '');
 }
 
 // ---------------------------------------------------------------------------
@@ -42,249 +76,543 @@ const WRAPPER_PATH = '/usr/local/bin/nvme-smart-log-json';
 const UNINSTALL_PATH = '/usr/local/bin/nvme-smart-uninstall.sh';
 const SETUP_SCRIPT_NAME = 'setup-polkit.sh';
 
-// The v2 stack is considered installed when the wrapper exists.
 function isV2Installed() {
     return GLib.file_test(WRAPPER_PATH, GLib.FileTest.EXISTS);
 }
 
-// The v2 uninstall script is available when the file exists.
 function isUninstallAvailable() {
     return GLib.file_test(UNINSTALL_PATH, GLib.FileTest.EXISTS);
 }
 
 // ---------------------------------------------------------------------------
-// Legacy polkit policy (kept as-is from the original extension)
+// Run a command synchronously (no pkexec).
+// Returns { ok, exitCode, stdout, stderr }.
 // ---------------------------------------------------------------------------
-const POLKIT_POLICY_CONTENT = '<?xml version="1.0" encoding="UTF-8"?>\n' +
-'<!DOCTYPE policyconfig PUBLIC\n' +
-'  "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"\n' +
-'  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">\n' +
-'<policyconfig>\n' +
-'\n' +
-'  <action id="com.custom.extension.nvme">\n' +
-'    <description>Access NVMe information</description>\n' +
-'    <message>Access NVMe drive information</message>\n' +
-'    <defaults>\n' +
-'      <allow_any>auth_admin_keep</allow_any>\n' +
-'      <allow_inactive>auth_admin_keep</allow_inactive>\n' +
-'      <allow_active>auth_admin_keep</allow_active>\n' +
-'    </defaults>\n' +
-'    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/nvme</annotate>\n' +
-'  </action>\n' +
-'</policyconfig>';
-
-function isPolicyInstalled() {
-    const policyFilePath = '/usr/share/polkit-1/actions/com.custom.extension.policy';
-    return GLib.file_test(policyFilePath, GLib.FileTest.EXISTS);
-}
-
-// ---------------------------------------------------------------------------
-// v2: Run a command via pkexec asynchronously using Gio.Subprocess.
-// Returns a Promise that resolves with { ok, stdout, stderr }.
-// ---------------------------------------------------------------------------
-function runPkexecAsync(argv) {
-    return new Promise((resolve) => {
-        try {
-            const pkexecPath = GLib.find_program_in_path('pkexec');
-            if (!pkexecPath) {
-                resolve({ ok: false, stdout: '', stderr: 'pkexec not found' });
-                return;
-            }
-
-            const fullArgv = [pkexecPath, ...argv];
-            const proc = new Gio.Subprocess({
-                argv: fullArgv,
-                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
-            });
-            proc.init(null);
-
-            const stdoutBuf = Gio.MemoryOutputStream.new_resizable();
-            const stderrBuf = Gio.MemoryOutputStream.new_resizable();
-
-            proc.communicate_async(
-                null, null,
-                (proc, res) => {
-                    try {
-                        const [stdoutBytes, stderrBytes] = proc.communicate_finish(res);
-                        const stdout = stdoutBytes ? new TextDecoder().decode(stdoutBytes.toArray()) : '';
-                        const stderr = stderrBytes ? new TextDecoder().decode(stderrBytes.toArray()) : '';
-                        resolve({ ok: true, stdout, stderr });
-                    } catch (e) {
-                        resolve({ ok: false, stdout: '', stderr: e.message });
-                    }
-                }
-            );
-        } catch (e) {
-            resolve({ ok: false, stdout: '', stderr: e.message });
-        }
-    });
-}
-
-// ---------------------------------------------------------------------------
-// v2: Run the wrapper synchronously (for polling).
-// Uses GLib.spawn_command_line_sync for simplicity, same as the original
-// code pattern. Returns parsed JSON or null.
-// ---------------------------------------------------------------------------
-function readSmartLogSync(devicePath) {
+function runCommandSync(argv) {
     try {
-        const cmd = `pkexec ${WRAPPER_PATH} ${devicePath}`;
-        const [success, stdout, stderr] = GLib.spawn_command_line_sync(cmd);
-        if (!success) {
-            console.log(`[explore-ui] smart-log failed: ${new TextDecoder().decode(stderr)}`);
-            return null;
-        }
-        return JSON.parse(new TextDecoder().decode(stdout));
+        const proc = new Gio.Subprocess({
+            argv: argv,
+            flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+        });
+        proc.init(null);
+
+        // communicate_utf8() returns [success, stdout, stderr] as strings.
+        const result = proc.communicate_utf8(null, null);
+
+        return {
+            ok: true,
+            exitCode: proc.get_exit_status(),
+            stdout: result[1] || '',
+            stderr: result[2] || '',
+        };
     } catch (e) {
-        console.log(`[explore-ui] smart-log error: ${e.message}`);
-        return null;
+        return { ok: false, exitCode: -1, stdout: '', stderr: e.message };
     }
 }
+
+// ---------------------------------------------------------------------------
+// Run a command via pkexec synchronously.
+// Returns { ok, exitCode, stdout, stderr }.
+// ---------------------------------------------------------------------------
+function runPkexecSync(argv) {
+    const pkexecPath = GLib.find_program_in_path('pkexec');
+    if (!pkexecPath) {
+        return { ok: false, exitCode: -1, stdout: '', stderr: 'pkexec not found' };
+    }
+    return runCommandSync([pkexecPath, ...argv]);
+}
+
+// ---------------------------------------------------------------------------
+// Indicator
+// ---------------------------------------------------------------------------
 
 const Indicator = GObject.registerClass(
     class Indicator extends PanelMenu.Button {
         _init() {
-            super._init(0.0, _('My Shiny Indicator'));
+            super._init(0.0, _('NVMe Monitor'));
 
-            this.add_child(new St.Icon({
-                icon_name: 'face-smile-symbolic',
+            // Panel icon — container for two icons side-by-side for comparison.
+            this._iconBox = new St.BoxLayout({ style_class: 'nvme-icon-compare' });
+            this._panelIconFill = new St.Icon({
+                icon_name: 'drive-harddisk-symbolic',
                 style_class: 'system-status-icon',
-            }));
+            });
+            this._panelIconOutline = new St.Icon({
+                icon_name: 'drive-harddisk-symbolic',
+                style_class: 'system-status-icon',
+            });
+            this._iconBox.add_child(this._panelIconFill);
+            this._iconBox.add_child(this._panelIconOutline);
+            this.add_child(this._iconBox);
 
-            // NVMe devices - fetched once
-            this._nvmeDevices = [];
-            this._fetchNVMeDevices();
-
-            // Temperature display as menu item
-            this._tempMenuItem = new PopupMenu.PopupMenuItem(_('NVMe: Loading...'));
-            this._tempMenuItem.label_actor.set_style('font-weight: bold;');
-            this.menu.addMenuItem(this._tempMenuItem);
+            // Cached device icon (loaded in _setupIcon)
+            this._deviceIcon = null;
+            // Cached NVMe device list (fetched once)
+            this._cachedDevices = null;
 
             // ---------------------------------------------------------------
-            // v2: Install / Uninstall buttons for the new polkit stack
+            // Menu structure:
+            //   [device section]  ← dynamically rebuilt on menu open
+            //   [separator]
+            //   [NVMe Stack toggle]
+            //   [separator]
+            //   [Heartbeat toggle]
+            // ---------------------------------------------------------------
+
+            // Device info section — cleared and rebuilt on each refresh.
+            this._devicesSection = new PopupMenuSection();
+            this.menu.addMenuItem(this._devicesSection);
+
+            this.menu.addMenuItem(new PopupSeparatorMenuItem());
+
+            // ---------------------------------------------------------------
+            // v2: NVMe Stack toggle (install/uninstall)
             // ---------------------------------------------------------------
             const v2Installed = isV2Installed();
+            _log(`init: isV2Installed=${v2Installed}`);
 
-            this._v2InstallItem = new PopupMenu.PopupMenuItem(
-                v2Installed ? _('NVMe Stack: Installed ✓') : _('Install NVMe Stack')
-            );
-            this._v2InstallItem.connect('activate', () => {
-                this._installV2Stack();
+            this._v2Updating = false;
+
+            this._v2Toggle = new PopupSwitchMenuItem(_('NVMe Stack'), v2Installed);
+
+            // If the stack is NOT installed and setup-polkit.sh is missing,
+            // the user cannot install — disable the toggle entirely.
+            // (check deferred to _checkSetupScript() called from enable())
+
+            this._v2ToggleHandlerId = this._v2Toggle.connect('toggled', (item, state) => {
+                _log(`toggled(state=${state}) _v2Updating=${this._v2Updating}`);
+                if (this._v2Updating) return;
+                this._v2Updating = true;
+
+                if (state) {
+                    this._installV2Stack();
+                } else {
+                    this._uninstallV2Stack();
+                }
             });
-            this.menu.addMenuItem(this._v2InstallItem);
-
-            this._v2UninstallItem = new PopupMenu.PopupMenuItem(_('Uninstall NVMe Stack'));
-            this._v2UninstallItem.setSensitive(isUninstallAvailable());
-            this._v2UninstallItem.connect('activate', () => {
-                this._uninstallV2Stack();
-            });
-            this.menu.addMenuItem(this._v2UninstallItem);
-
-            // Separator between v2 buttons and legacy controls
-            this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-            // ---------------------------------------------------------------
-            // Legacy: Polkit Policy toggle (kept as-is)
-            // ---------------------------------------------------------------
-            // Polkit Policy toggle - use Switch if available
-            this._useShellSwitch = !!Switch;
-
-            if (this._useShellSwitch) {
-                const policyInstalled = isPolicyInstalled();
-                this._polkitToggle = new PopupMenu.PopupMenuItem(_('Polkit Policy'));
-                this._polkitSwitch = new Switch({ active: policyInstalled, halign: Clutter.ActorAlign.END });
-                this._polkitToggle.add_child(this._polkitSwitch);
-                this._polkitSwitch.connect('state-set', (sw, state) => {
-                    if (state) {
-                        this._installPolkitPolicy();
-                    } else {
-                        this._removePolkitPolicy();
-                    }
-                    return true;
-                });
-                this.menu.addMenuItem(this._polkitToggle);
-
-                this._refreshToggle = new PopupMenu.PopupMenuItem(_('Auto-Refresh (5s)'));
-                this._refreshSwitch = new Switch({ active: false, halign: Clutter.ActorAlign.END, sensitive: policyInstalled });
-                this._refreshToggle.add_child(this._refreshSwitch);
-                this._refreshSwitch.connect('state-set', (sw, state) => {
-                    if (state) {
-                        this._startTemperaturePolling();
-                    } else {
-                        this._stopTemperaturePolling();
-                    }
-                    return true;
-                });
-                this.menu.addMenuItem(this._refreshToggle);
-            } else {
-                // Fallback to text toggles
-                const policyInstalled = isPolicyInstalled();
-                this._polkitToggle = new PopupMenu.PopupMenuItem(policyInstalled ? _('Polkit Policy: ON') : _('Polkit Policy: OFF'));
-                this._polkitToggle.connect('activate', () => {
-                    if (isPolicyInstalled()) {
-                        this._removePolkitPolicy();
-                    } else {
-                        this._installPolkitPolicy();
-                    }
-                });
-                this.menu.addMenuItem(this._polkitToggle);
-
-                this._refreshToggle = new PopupMenu.PopupMenuItem(_('Auto-Refresh (5s): OFF'));
-                this._refreshToggle.setSensitive(policyInstalled);
-                this._refreshToggle.connect('activate', () => {
-                    if (this._tempPollId) {
-                        this._stopTemperaturePolling();
-                        this._refreshToggle.label_actor.set_text(_('Auto-Refresh (5s): OFF'));
-                    } else {
-                        this._startTemperaturePolling();
-                        this._refreshToggle.label_actor.set_text(_('Auto-Refresh (5s): ON'));
-                    }
-                });
-                this.menu.addMenuItem(this._refreshToggle);
-            }
-
-            // Don't auto-start temperature polling - user must toggle Auto-Refresh ON
-            // this._startTemperaturePolling();
+            this.menu.addMenuItem(this._v2Toggle);
 
             // Separator
-            this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            this.menu.addMenuItem(new PopupSeparatorMenuItem());
+
+            // Heartbeat toggle — OFF, disabled (debug placeholder)
+            this._heartbeatToggle = new PopupSwitchMenuItem(_('Heartbeat'), false);
+            this._heartbeatToggle.setSensitive(false);
+            this._heartbeatToggle.connect('toggled', (item, state) => {
+                _log(`Heartbeat toggled: ${state}`);
+            });
+            this.menu.addMenuItem(this._heartbeatToggle);
+
+            // Refresh device data when the menu is opened.
+            this._lastRefreshTime = 0;
+            this._pollingTimer = null;
+            this.menu.connect('open-state-changed', (menu, open) => {
+                if (open) this._refreshDevices();
+            });
+        }
+
+        // -------------------------------------------------------------------
+        // Load the two NVMe SVG icons for comparison in the panel.
+        // Left: nvme-fill-dark.svg (filled), Right: nvme-dark.svg (outline).
+        // -------------------------------------------------------------------
+        _setupIcon() {
+            const iconDir = GLib.build_filenamev([this._extensionPath || '', 'icons', 'bootstrap']);
+
+            const fillPath = GLib.build_filenamev([iconDir, 'nvme-fill-dark.svg']);
+            const outlinePath = GLib.build_filenamev([iconDir, 'nvme-dark.svg']);
+
+            if (GLib.file_test(fillPath, GLib.FileTest.EXISTS)) {
+                this._panelIconFill.set_gicon(new Gio.FileIcon({
+                    file: Gio.File.new_for_path(fillPath),
+                }));
+                _log(`Panel icon (fill) loaded: ${fillPath}`);
+            } else {
+                _log(`Panel icon (fill) not found: ${fillPath}`);
+            }
+
+            if (GLib.file_test(outlinePath, GLib.FileTest.EXISTS)) {
+                this._panelIconOutline.set_gicon(new Gio.FileIcon({
+                    file: Gio.File.new_for_path(outlinePath),
+                }));
+                _log(`Panel icon (outline) loaded: ${outlinePath}`);
+            } else {
+                _log(`Panel icon (outline) not found: ${outlinePath}`);
+            }
+
+            // Cache the device icon for menu headers.
+            const devIconPath = GLib.build_filenamev([iconDir, 'nvme-dark.svg']);
+            if (GLib.file_test(devIconPath, GLib.FileTest.EXISTS)) {
+                this._deviceIcon = new Gio.FileIcon({ file: Gio.File.new_for_path(devIconPath) });
+            } else {
+                const devFallback = GLib.build_filenamev([iconDir, 'nvme.svg']);
+                this._deviceIcon = GLib.file_test(devFallback, GLib.FileTest.EXISTS)
+                    ? new Gio.FileIcon({ file: Gio.File.new_for_path(devFallback) })
+                    : null;
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Start/stop the 5-second polling timer.
+        // Only active when the polkit stack is installed.
+        // -------------------------------------------------------------------
+        _startPolling() {
+            if (this._pollingTimer) return;
+            this._pollingTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 5, () => {
+                this._refreshDevices();
+                return GLib.SOURCE_CONTINUE;
+            });
+            _log('Polling timer started (5s interval)');
+        }
+
+        _stopPolling() {
+            if (this._pollingTimer) {
+                GLib.source_remove(this._pollingTimer);
+                this._pollingTimer = null;
+                _log('Polling timer stopped');
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Check if setup-polkit.sh exists; disable toggle if not installed
+        // and script is missing. Called from enable() after path is set.
+        // -------------------------------------------------------------------
+        _checkSetupScript() {
+            if (isV2Installed()) return;
+            const setupPath = GLib.build_filenamev([this._extensionPath || '', SETUP_SCRIPT_NAME]);
+            if (!GLib.file_test(setupPath, GLib.FileTest.EXISTS)) {
+                _log(`setup-polkit.sh missing — disabling toggle`);
+                this._v2Toggle.setSensitive(false);
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Fetch NVMe device list once and cache it.
+        // Returns the cached devices or null on failure.
+        // -------------------------------------------------------------------
+        _fetchAndCacheDevices() {
+            if (this._cachedDevices !== null) {
+                return this._cachedDevices;
+            }
+
+            const nvmeBin = GLib.find_program_in_path('nvme');
+            if (!nvmeBin) {
+                _log('nvme-cli not found');
+                return null;
+            }
+
+            const listResult = runCommandSync([nvmeBin, 'list', '-o', 'json']);
+            _log(`nvme list: ok=${listResult.ok} exitCode=${listResult.exitCode} stdout_len=${listResult.stdout?.length || 0} stderr_len=${listResult.stderr?.length || 0}`);
+            if (!listResult.ok || listResult.exitCode !== 0) {
+                _log('Failed to list NVMe devices');
+                return null;
+            }
+
+            try {
+                const parsed = JSON.parse(listResult.stdout);
+                this._cachedDevices = parsed.Devices || [];
+                _log(`nvme list: found ${this._cachedDevices.length} devices (cached)`);
+                return this._cachedDevices;
+            } catch (e) {
+                _log(`nvme list: JSON parse error: ${e.message}`);
+                _log(`nvme list: raw stdout: ${listResult.stdout?.substring(0, 200) || '(empty)'}`);
+                _log(`nvme list: raw stderr: ${listResult.stderr?.substring(0, 200) || '(empty)'}`);
+                return null;
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Collect NVMe devices and populate the device section.
+        // Called on menu open and by the polling timer (every 5 seconds
+        // when the polkit stack is installed).
+        // -------------------------------------------------------------------
+        _refreshDevices() {
+            // Clear previous content.
+            this._devicesSection.removeAll();
+
+            // Load device icon (cached).
+            if (!this._deviceIcon) {
+                const iconPath = GLib.build_filenamev([this._extensionPath || '', 'icons', 'bootstrap', 'nvme.svg']);
+                if (GLib.file_test(iconPath, GLib.FileTest.EXISTS)) {
+                    this._deviceIcon = new Gio.FileIcon({
+                        file: Gio.File.new_for_path(iconPath),
+                    });
+                }
+            }
+
+            // --- Step 1: get cached NVMe devices ---
+            const devices = this._fetchAndCacheDevices();
+            if (devices === null) {
+                this._addInfoLine(_('nvme-cli not installed'));
+                return;
+            }
+
+            if (devices.length === 0) {
+                this._addInfoLine(_('No NVMe devices found'));
+                return;
+            }
+
+            const v2Installed = isV2Installed();
+
+            // --- Step 2: for each device, show info + SMART data ---
+
+            for (let i = 0; i < devices.length; i++) {
+                const dev = devices[i];
+
+                if (i > 0) {
+                    this._devicesSection.addMenuItem(new PopupSeparatorMenuItem());
+                }
+
+                // Device header: icon + bold model name
+                this._addDeviceHeader(dev.ModelNumber || dev.DevicePath);
+
+                // Device path + firmware (dimmed)
+                this._addInfoLine(`${dev.DevicePath} — FW: ${dev.Firmware}`, 'nvme-device-meta');
+
+                // SMART data (requires polkit stack)
+                if (v2Installed) {
+                    const smartResult = runPkexecSync([WRAPPER_PATH, dev.DevicePath]);
+                    if (smartResult.ok && smartResult.exitCode === 0) {
+                        try {
+                            const smart = JSON.parse(smartResult.stdout);
+                            this._addSmartInfo(smart);
+                        } catch (e) {
+                            this._addInfoLine(_('  SMART: parse error'));
+                        }
+                    } else {
+                        this._addInfoLine(_('  SMART: unavailable'), 'nvme-smart-info');
+                    }
+                } else {
+                    this._addInfoLine(_('  Install NVMe Stack for SMART data'), 'nvme-smart-info');
+                }
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Add a device header line: icon + bold label, non-interactive.
+        // -------------------------------------------------------------------
+        _addDeviceHeader(modelName) {
+            const header = new PopupBaseMenuItem({ reactive: false, can_focus: false });
+
+            if (this._deviceIcon) {
+                header.add_child(new St.Icon({
+                    gicon: this._deviceIcon,
+                    icon_size: 16,
+                }));
+            }
+
+            const label = new St.Label({ text: modelName });
+            label.set_x_expand(true);
+            label.add_style_class_name('nvme-device-header');
+            header.add_child(label);
+
+            this._devicesSection.addMenuItem(header);
+        }
+
+        // -------------------------------------------------------------------
+        // Add a non-interactive info line with optional icon.
+        // -------------------------------------------------------------------
+        _addInfoLine(text, styleClass = '', iconName = null) {
+            const item = new PopupMenuItem(text);
+            item.reactive = false;
+            if (styleClass && item.label) {
+                item.label.add_style_class_name(styleClass);
+            }
+            // Prepend icon if provided
+            if (iconName) {
+                const icon = new St.Icon({
+                    icon_name: iconName,
+                    icon_size: 16,
+                    style_class: 'nvme-info-icon',
+                });
+                // Insert icon at the beginning of the item's children
+                const children = item.get_children();
+                if (children.length > 0) {
+                    item.insert_child_at_index(icon, 0);
+                    // Add spacing between icon and text
+                    const spacer = new St.Label({ text: ' ', y_align: Clutter.ActorAlign.CENTER });
+                    item.insert_child_at_index(spacer, 1);
+                } else {
+                    item.add_child(icon);
+                }
+            }
+            this._devicesSection.addMenuItem(item);
+        }
+
+        // -------------------------------------------------------------------
+        // Get thermometer icon based on temperature range.
+        // ---------------------------------------------------------------------------
+        _getThermometerIcon(tempCelsius) {
+            if (tempCelsius === null || tempCelsius === undefined) {
+                return null;
+            }
+            if (tempCelsius < 40) {
+                return 'thermometer-low';
+            } else if (tempCelsius < 60) {
+                return 'thermometer-half';
+            } else {
+                return 'thermometer-high';
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Get temperature style class based on range.
+        // ---------------------------------------------------------------------------
+        _getTempStyle(tempCelsius) {
+            if (tempCelsius === null || tempCelsius === undefined) {
+                return 'nvme-smart-attr';
+            }
+            if (tempCelsius < 40) {
+                return 'nvme-smart-attr';
+            } else if (tempCelsius < 60) {
+                return 'nvme-smart-warning-orange';
+            } else {
+                return 'nvme-smart-warning-red';
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Parse SMART JSON and add structured sections to the device section.
+        // Uses the modular parser (BaseParser / SamsungParser).
+        // -------------------------------------------------------------------
+        _addSmartInfo(smartRaw) {
+            const smart = parseSmart(smartRaw);
+            const manuf = smart.manufacturer;
+
+            // ---------------------------------------------------------------
+            // Temperature Section
+            // ---------------------------------------------------------------
+            if (smart.temperature.composite !== null) {
+                const icon = this._getThermometerIcon(smart.temperature.composite);
+                const style = this._getTempStyle(smart.temperature.composite);
+
+                if (manuf === 'Samsung' && smart.temperature.sensors.length >= 2) {
+                    // Samsung: T_icon: yyy°C (controller: xxx ; NAND: zzz)
+                    const sensor1 = smart.temperature.sensors[0] || '?';
+                    const sensor2 = smart.temperature.sensors[1] || '?';
+                    this._addInfoLine(
+                        `${smart.temperature.composite}°C (controller: ${sensor1} ; NAND: ${sensor2})`,
+                        style,
+                        icon
+                    );
+                } else {
+                    // Generic: T_icon: yyy°C
+                    this._addInfoLine(
+                        `${smart.temperature.composite}°C`,
+                        style,
+                        icon
+                    );
+                }
+
+                // Additional sensors (if any, not Samsung or Samsung with >2 sensors)
+                if (manuf !== 'Samsung' && smart.temperature.sensors.length > 0) {
+                    for (let i = 0; i < smart.temperature.sensors.length; i++) {
+                        const sensorTemp = smart.temperature.sensors[i];
+                        const sensorIcon = this._getThermometerIcon(sensorTemp);
+                        const sensorStyle = this._getTempStyle(sensorTemp);
+                        this._addInfoLine(`  ${_('Sensor')} ${i + 1}: ${sensorTemp}°C`, sensorStyle, sensorIcon);
+                    }
+                }
+            }
+
+            // ---------------------------------------------------------------
+            // Health Section
+            // ---------------------------------------------------------------
+            if (smart.health.availableSparePercent !== undefined) {
+                this._addInfoLine(`  ${_('Available Spare')}: ${smart.health.availableSparePercent}%`, 'nvme-smart-attr');
+            }
+            if (smart.health.percentageUsed !== undefined) {
+                this._addInfoLine(`  ${_('Percentage Used')}: ${smart.health.percentageUsed}%`, 'nvme-smart-attr');
+            }
+
+            // ---------------------------------------------------------------
+            // Endurance Section
+            // ---------------------------------------------------------------
+            if (smart.endurance.powerCycles !== undefined) {
+                this._addInfoLine(`  ${_('Power Cycles')}: ${smart.endurance.powerCycles}`, 'nvme-smart-attr');
+            }
+            if (smart.endurance.powerOnHours !== undefined) {
+                this._addInfoLine(`  ${_('Power On Hours')}: ${smart.endurance.powerOnHours}h`, 'nvme-smart-attr');
+            }
+            if (smart.endurance.dataUnitsRead !== undefined) {
+                this._addInfoLine(`  ${_('Data Read')}: ${smart.endurance.dataUnitsRead} units`, 'nvme-smart-attr');
+            }
+            if (smart.endurance.dataUnitsWritten !== undefined) {
+                this._addInfoLine(`  ${_('Data Written')}: ${smart.endurance.dataUnitsWritten} units`, 'nvme-smart-attr');
+            }
+            if (smart.endurance.unsafeShutdowns !== undefined) {
+                this._addInfoLine(`  ${_('Unsafe Shutdowns')}: ${smart.endurance.unsafeShutdowns}`, 'nvme-smart-attr');
+            }
+
+            // Samsung-specific: host reads/writes
+            if (manuf === 'Samsung') {
+                if (smart.endurance.hostReads !== undefined) {
+                    this._addInfoLine(`  ${_('Host Reads')}: ${smart.endurance.hostReads}`, 'nvme-smart-attr');
+                }
+                if (smart.endurance.hostWrites !== undefined) {
+                    this._addInfoLine(`  ${_('Host Writes')}: ${smart.endurance.hostWrites}`, 'nvme-smart-attr');
+                }
+            }
+
+            // ---------------------------------------------------------------
+            // Alerts Section
+            // ---------------------------------------------------------------
+            if (smart.alerts.mediaErrors !== undefined && smart.alerts.mediaErrors > 0) {
+                this._addInfoLine(`  ${_('Media Errors')}: ${smart.alerts.mediaErrors}`, 'nvme-smart-warning');
+            }
+            if (smart.alerts.criticalWarning !== undefined && smart.alerts.criticalWarning !== 0) {
+                this._addInfoLine(`  ${_('Critical Warning')}: ${smart.alerts.criticalWarning}`, 'nvme-smart-warning');
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // v2: Toggle state helper — bypass setToggleState() entirely.
+        // setToggleState() emits 'toggled' asynchronously, bypassing the
+        // _v2Updating guard. Set the internal state + visual switch directly.
+        // -------------------------------------------------------------------
+        _updateV2ToggleState(active) {
+            this._v2Toggle._state = active;
+            if (this._v2Toggle._switch)
+                this._v2Toggle._switch.state = active;
+            _log(`_updateV2ToggleState(${active}) — state set directly, no signal emitted`);
         }
 
         // -------------------------------------------------------------------
         // v2: Install the new polkit stack via setup-polkit.sh
         // -------------------------------------------------------------------
         _installV2Stack() {
-            logAndNotify(_('Installing NVMe polkit stack...'));
-
-            // The setup script is shipped alongside the extension.
-            // We look for it in the extension's directory.
-            const extDir = GLib.path_get_dirname(this._extensionPath || '');
-            const setupPath = GLib.build_filenamev([extDir, SETUP_SCRIPT_NAME]);
+            const setupPath = GLib.build_filenamev([this._extensionPath || '', SETUP_SCRIPT_NAME]);
+            _log(`_installV2Stack: setupPath=${setupPath}`);
 
             if (!GLib.file_test(setupPath, GLib.FileTest.EXISTS)) {
-                logAndNotify(_('setup-polkit.sh not found in extension directory:\n') + setupPath);
+                _log(`setup-polkit.sh not found: ${setupPath}`);
+                Main.notify(_('setup-polkit.sh not found. Place it in the extension directory.'));
+                this._v2Toggle.setSensitive(false);
+                this._v2Updating = false;
                 return;
             }
 
-            // Run via pkexec (will prompt for password once)
-            runPkexecAsync([setupPath]).then((result) => {
-                if (result.ok && result.stderr === '') {
-                    logAndNotify(_('NVMe polkit stack installed!\nLog out and back in for group membership to take effect.'));
+            _log('Running pkexec setup-polkit.sh...');
+            this._v2Toggle.setSensitive(false);
 
-                    // Update button states
-                    this._v2InstallItem.label_actor.set_text(_('NVMe Stack: Installed ✓'));
-                    this._v2UninstallItem.setSensitive(true);
+            const result = runPkexecSync([setupPath]);
 
-                    // Remove the setup script from the extension directory
-                    // (security: prevents TOCTOU after installation)
-                    try {
-                        GLib.unlink(setupPath);
-                    } catch (e) {
-                        console.log(`[explore-ui] Could not remove setup-polkit.sh: ${e.message}`);
-                    }
-                } else {
-                    logAndNotify(_('Installation failed: ') + result.stderr);
-                }
-            });
+            this._v2Toggle.setSensitive(true);
+
+            if (result.stderr) _log(`stderr: ${result.stderr.trim()}`);
+            if (result.stdout) _log(`stdout: ${result.stdout.trim()}`);
+
+            if (result.ok && result.exitCode === 0) {
+                _log('✓ Installation complete');
+                logAndNotify(_('NVMe polkit stack installed!'), _('Please log out and back in for new group membership.'));
+                this._updateV2ToggleState(true);
+                this._startPolling();
+            } else {
+                _log(`✗ Installation failed (exit code ${result.exitCode})`);
+                Main.notify(_('Installation failed (exit code ') + result.exitCode + ')');
+                this._updateV2ToggleState(false);
+            }
+
+            this._v2Updating = false;
         }
 
         // -------------------------------------------------------------------
@@ -292,265 +620,96 @@ const Indicator = GObject.registerClass(
         // -------------------------------------------------------------------
         _uninstallV2Stack() {
             if (!isUninstallAvailable()) {
-                logAndNotify(_('Uninstall script not found.'));
+                _uninstallNotFoundCount++;
+                _log(`Uninstall script not found. (count=${_uninstallNotFoundCount}/${KILL_THRESHOLD})`);
+
+                if (_uninstallNotFoundCount >= KILL_THRESHOLD) {
+                    _log(`⛔ Kill threshold reached (${KILL_THRESHOLD}). Disabling extension to break loop.`);
+                    Main.notify(`NVMe Monitor: boucle détectée — extension désactivée.`);
+                    try {
+                        const dbus = Gio.DBus.session;
+                        dbus.call_sync(
+                            'org.gnome.Shell.Extensions',
+                            '/org/gnome/Shell/Extensions',
+                            'org.gnome.Shell.Extensions',
+                            'DisableExtension',
+                            new GLib.Variant('(s)', ['nvme-monitor@rloutrel.github.com']),
+                            null,
+                            Gio.DBusCallFlags.NONE,
+                            -1,
+                            null
+                        );
+                    } catch (e) {
+                        _log(`Could not disable via D-Bus: ${e.message}`);
+                    }
+                    return;
+                }
+
+                Main.notify(_('Uninstall script not found.'));
+                this._updateV2ToggleState(true);
+                this._v2Updating = false;
                 return;
             }
 
-            logAndNotify(_('Uninstalling NVMe polkit stack...'));
+            _log('Running pkexec nvme-smart-uninstall.sh...');
+            this._v2Toggle.setSensitive(false);
 
-            // Stop polling first
-            this._stopTemperaturePolling();
+            const result = runPkexecSync([UNINSTALL_PATH]);
 
-            // Run via pkexec (no prompt thanks to the polkit rule)
-            runPkexecAsync([UNINSTALL_PATH]).then((result) => {
-                if (result.ok) {
-                    logAndNotify(_('NVMe polkit stack uninstalled.'));
+            this._v2Toggle.setSensitive(true);
 
-                    // Update button states
-                    this._v2InstallItem.label_actor.set_text(_('Install NVMe Stack'));
-                    this._v2UninstallItem.setSensitive(false);
-                    this._tempMenuItem.label_actor.set_text(_('NVMe: Stack not installed'));
-                } else {
-                    logAndNotify(_('Uninstall failed: ') + result.stderr);
-                }
-            });
-        }
+            if (result.stderr) _log(`stderr: ${result.stderr.trim()}`);
+            if (result.stdout) _log(`stdout: ${result.stdout.trim()}`);
 
-        _updatePolkitToggleState(active) {
-            if (this._useShellSwitch) {
-                this._polkitSwitch.setActive(active);
-                this._refreshSwitch.setSensitive(active);
+            if (result.ok && result.exitCode === 0) {
+                _log('✓ Uninstall complete');
+                logAndNotify(_('NVMe polkit stack uninstalled.'), '');
+                this._updateV2ToggleState(false);
+                this._stopPolling();
             } else {
-                this._polkitToggle.label_actor.set_text(active ? _('Polkit Policy: ON') : _('Polkit Policy: OFF'));
-                this._refreshToggle.setSensitive(active);
+                _log(`✗ Uninstall failed (exit code ${result.exitCode})`);
+                Main.notify(_('Uninstall failed (exit code ') + result.exitCode + ')');
+                this._updateV2ToggleState(true);
             }
+
+            this._v2Updating = false;
         }
 
-        _updateRefreshToggleState(active) {
-            if (this._useShellSwitch) {
-                this._refreshSwitch.setActive(active);
-            } else {
-                this._refreshToggle.label_actor.set_text(active ? _('Auto-Refresh (5s): ON') : _('Auto-Refresh (5s): OFF'));
-            }
-        }
 
-        _installPolkitPolicy() {
-            try {
-                const policyFilePath = '/usr/share/polkit-1/actions/com.custom.extension.policy';
-
-                // Create a temporary file with the policy content
-                const tmpDir = GLib.get_tmp_dir();
-                const tmpFilePath = `${tmpDir}/com.custom.extension.policy`;
-
-                // Write to temp file
-                const writeTmpSuccess = GLib.file_set_contents(tmpFilePath, POLKIT_POLICY_CONTENT);
-
-                if (!writeTmpSuccess) {
-                    logAndNotify(_('Failed to create temp file in /tmp'));
-                    return;
-                }
-
-                // Copy to system location with pkexec
-                const copyCmd = `pkexec cp ${tmpFilePath} ${policyFilePath}`;
-                const [copySuccess, , copyStderr] = GLib.spawn_command_line_sync(copyCmd);
-
-                if (!copySuccess) {
-                    logAndNotify(_('Failed to copy policy: ') + new TextDecoder().decode(copyStderr));
-                    GLib.unlink(tmpFilePath);
-                    return;
-                }
-
-                // Clean up temp file
-                GLib.unlink(tmpFilePath);
-
-                // Restart polkit
-                const restartCmd = 'pkexec systemctl restart polkit';
-                const [restartSuccess, , restartStderr] = GLib.spawn_command_line_sync(restartCmd);
-
-                if (!restartSuccess) {
-                    logAndNotify(_('Failed to restart polkit: ') + new TextDecoder().decode(restartStderr));
-                    return;
-                }
-
-                logAndNotify(_('Polkit policy installed successfully!\nAuthentication prompts should now remember for 5-10 minutes.'));
-
-                // Update toggle states
-                this._updatePolkitToggleState(true);
-                // Don't auto-start polling - user must toggle Auto-Refresh
-                // this._startTemperaturePolling();
-
-            } catch (e) {
-                logAndNotify(_('Error: ') + e.message);
-            }
-        }
-
-        _removePolkitPolicy() {
-            try {
-                const policyFilePath = '/usr/share/polkit-1/actions/com.custom.extension.policy';
-
-                if (!isPolicyInstalled()) {
-                    logAndNotify(_('Polkit policy is not installed.'));
-                    return;
-                }
-
-                // Remove policy file with pkexec
-                const removeCmd = `pkexec rm ${policyFilePath}`;
-                const [removeSuccess, , removeStderr] = GLib.spawn_command_line_sync(removeCmd);
-
-                if (!removeSuccess) {
-                    logAndNotify(_('Failed to remove policy: ') + new TextDecoder().decode(removeStderr));
-                    return;
-                }
-
-                // Restart polkit
-                const restartCmd = 'pkexec systemctl restart polkit';
-                const [restartSuccess, , restartStderr] = GLib.spawn_command_line_sync(restartCmd);
-
-                if (!restartSuccess) {
-                    logAndNotify(_('Failed to restart polkit: ') + new TextDecoder().decode(restartStderr));
-                    return;
-                }
-
-                logAndNotify(_('Polkit policy removed successfully!\nAuthentication prompts will return to default behavior.'));
-
-                // Update toggle states
-                this._updatePolkitToggleState(false);
-                this._updateRefreshToggleState(false);
-                // Stop polling
-                this._stopTemperaturePolling();
-                this._tempMenuItem.label_actor.set_text(_('NVMe: Polkit required'));
-
-            } catch (e) {
-                logAndNotify(_('Error: ') + e.message);
-            }
-        }
-
-        _startTemperaturePolling() {
-            if (this._tempPollId) {
-                GLib.source_remove(this._tempPollId);
-            }
-            const pkexecPath = GLib.find_program_in_path('pkexec');
-            // v2: use the wrapper if installed, otherwise fall back to legacy
-            const canPoll = pkexecPath && (isV2Installed() || isPolicyInstalled());
-            if (canPoll) {
-                this._tempPollId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 5, () => {
-                    this._pollTemperatures();
-                    return GLib.SOURCE_CONTINUE;
-                });
-                this._tempMenuItem.label_actor.set_text(_('NVMe: Loading...'));
-                this._pollTemperatures(); // Immediate first read
-                this._updateRefreshToggleState(true);
-            } else {
-                this._tempMenuItem.label_actor.set_text(_('NVMe: Polkit required'));
-            }
-        }
-
-        _stopTemperaturePolling() {
-            if (this._tempPollId) {
-                GLib.source_remove(this._tempPollId);
-                this._tempPollId = null;
-            }
-            this._updateRefreshToggleState(false);
-        }
-
-        _fetchNVMeDevices() {
-            try {
-                // Get device list with JSON output to get model names
-                const [success, listOutput, stderr] = GLib.spawn_command_line_sync('nvme list -o json');
-                if (!success) {
-                    console.log(`[explore-ui] Error getting NVMe list: ${new TextDecoder().decode(stderr)}`);
-                    this._tempMenuItem.label_actor.set_text(_('NVMe: Error'));
-                    return;
-                }
-
-                const listData = JSON.parse(new TextDecoder().decode(listOutput));
-                this._nvmeDevices = [];
-
-                if (listData.Devices && Array.isArray(listData.Devices)) {
-                    for (const device of listData.Devices) {
-                        this._nvmeDevices.push({
-                            path: device.DevicePath,
-                            model: device.ModelNumber || _('Unknown')
-                        });
-                    }
-                }
-
-                if (this._nvmeDevices.length === 0) {
-                    this._tempMenuItem.label_actor.set_text(_('NVMe: No devices'));
-                }
-            } catch (e) {
-                console.log(`[explore-ui] Error: ${e.message}`);
-                this._tempMenuItem.label_actor.set_text(_('NVMe: Error'));
-            }
-        }
-
-        _pollTemperatures() {
-            if (this._nvmeDevices.length === 0) return;
-
-            let results = [];
-            for (const device of this._nvmeDevices) {
-                try {
-                    let smartData = null;
-
-                    // v2: prefer the wrapper (no prompt) if installed
-                    if (isV2Installed()) {
-                        smartData = readSmartLogSync(device.path);
-                    } else {
-                        // Legacy: pkexec nvme smart-log directly
-                        const [smartSuccess, smartOutput, smartStderr] = GLib.spawn_command_line_sync(`pkexec nvme smart-log ${device.path} -o json`);
-                        if (smartSuccess) {
-                            smartData = JSON.parse(new TextDecoder().decode(smartOutput));
-                        }
-                    }
-
-                    if (smartData) {
-                        // Extract main temperature and all sensors
-                        let mainTemp = null;
-                        let allTemps = [];
-                        for (const [key, value] of Object.entries(smartData)) {
-                            if (key.startsWith('temperature') && typeof value === 'number') {
-                                const tempC = Math.round((value - 273.15) * 10) / 10;
-                                if (key === 'temperature') {
-                                    mainTemp = tempC;
-                                }
-                                else {
-                                    allTemps.push(tempC);
-                                }
-                            }
-                        }
-
-                        if (mainTemp !== null) {
-                            // Format: ModelName: main_temp (sensor1,sensor2,...)
-                            const sensorsCsv = allTemps.join(',');
-                            results.push(`${device.model}: ${mainTemp}\u00b0C (${sensorsCsv})`);
-                        }
-                    } else {
-                        results.push(`${device.model}: Error`);
-                    }
-                } catch (e) {
-                    results.push(`${device.model}: Error`);
-                }
-            }
-
-            if (results.length > 0) {
-                this._tempMenuItem.label_actor.set_text(results.join('\n'));
-            }
+        destroy() {
+            this._stopPolling();
+            super.destroy();
         }
     });
 
 export default class IndicatorExampleExtension extends Extension {
     enable() {
+        _log('enable() enter');
         this._indicator = new Indicator();
-        // Pass the extension path so the indicator can find setup-polkit.sh
         this._indicator._extensionPath = this.path;
+        this._indicator._setupIcon();
+        this._indicator._checkSetupScript();
+        // Start polling if the polkit stack is already installed.
+        if (isV2Installed()) {
+            this._indicator._startPolling();
+        }
         Main.panel.addToStatusArea(this.uuid, this._indicator);
+        // Load extension stylesheet (device header, meta lines, smart values)
+        this._stylesheet = Gio.File.new_for_path(GLib.build_filenamev([this.path, 'stylesheet.css']));
+        St.ThemeContext.get_for_stage(global.stage).get_theme().load_stylesheet(this._stylesheet);
+        _log('enable() exit');
     }
 
     disable() {
-        if (this._indicator) {
-            this._indicator._stopTemperaturePolling();
+        _log('disable() enter');
+        if (this._stylesheet) {
+            St.ThemeContext.get_for_stage(global.stage).get_theme().unload_stylesheet(this._stylesheet);
+            this._stylesheet = null;
         }
-        this._indicator.destroy();
+        if (this._indicator) {
+            this._indicator.destroy();
+        }
         this._indicator = null;
+        _log('disable() exit');
     }
 }
