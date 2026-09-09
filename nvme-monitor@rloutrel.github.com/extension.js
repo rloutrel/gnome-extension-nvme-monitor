@@ -96,6 +96,8 @@ const ICONS = Object.freeze({
     ThermometerHalf: 'thermometer-half',
     ThermometerHigh: 'thermometer-high',
     Plug: 'plug',
+    Database: 'database',
+    ArrowLeftRight: 'arrow-left-right',
     Eyeglasses: 'eyeglasses',
     VectorPen: 'vector-pen',
     PanelFallback: 'drive-harddisk-symbolic',
@@ -540,8 +542,10 @@ const Indicator = GObject.registerClass(
 
         // -------------------------------------------------------------------
         // Add a non-interactive line made of icon+value segments, each with a
-        // hover tooltip revealing the raw value. `segments` is an array of
-        // { iconName, value, tooltip } objects.
+        // hover tooltip revealing the raw value. Each segment is
+        // { iconName, value, tooltip?, sectionIcon? }. When `sectionIcon`
+        // is set, a non-interactive group icon is rendered before the
+        // segment, with a larger gap to visually separate the groups.
         // -------------------------------------------------------------------
         _addMetricSegmentsLine(segments, styleClass = 'nvme-smart-attr') {
             if (!segments || segments.length === 0) return;
@@ -549,6 +553,15 @@ const Indicator = GObject.registerClass(
 
             for (let i = 0; i < segments.length; i++) {
                 const seg = segments[i];
+
+                if (seg.sectionIcon) {
+                    if (i > 0) {
+                        const gap = new St.Label({ text: '   ', y_align: Clutter.ActorAlign.CENTER });
+                        item.add_child(gap);
+                    }
+                    item.add_child(this._createIcon(seg.sectionIcon, 16, 'nvme-info-icon'));
+                }
+
                 const iconActor = this._createIcon(seg.iconName, 16, 'nvme-info-icon');
                 if (seg.tooltip) {
                     iconActor.reactive = true;
@@ -679,13 +692,15 @@ const Indicator = GObject.registerClass(
                 this._addInfoLine(`  ${powerParts.join(' · ')}`, 'nvme-smart-attr', ICONS.Plug);
             }
 
-            // Data + Host on a single line. Read uses the eyeglasses icon,
-            // write uses the vector-pen icon. The human-readable value is
-            // shown; the raw value is revealed on hover. Samsung host
-            // reads/writes (command counts) follow the same logic.
+            // Data + Host on a single line. Each group keeps its own section
+            // icon: database for data units, arrow-left-right for host
+            // commands (Samsung). Read uses the eyeglasses icon, write uses
+            // the vector-pen icon. The human-readable value is shown; the raw
+            // value is revealed on hover.
             const segments = [];
             if (smart.endurance.dataUnitsRead !== undefined) {
                 segments.push({
+                    sectionIcon: ICONS.Database,
                     iconName: ICONS.Eyeglasses,
                     value: formatDataUnits(smart.endurance.dataUnitsRead),
                     tooltip: `${_('Data Read')}: ${smart.endurance.dataUnitsRead} units`,
@@ -701,6 +716,7 @@ const Indicator = GObject.registerClass(
             if (manuf === 'Samsung') {
                 if (smart.endurance.hostReads !== undefined) {
                     segments.push({
+                        sectionIcon: ICONS.ArrowLeftRight,
                         iconName: ICONS.Eyeglasses,
                         value: formatCompactNumber(smart.endurance.hostReads),
                         tooltip: `${_('Host Reads')}: ${smart.endurance.hostReads.toLocaleString('en-US')}`,
