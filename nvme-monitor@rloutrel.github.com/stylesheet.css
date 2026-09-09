@@ -87,6 +87,13 @@
     spacing: 6px;
 }
 
+/* Section icon (database, arrow-left-right) at the start of a metric
+ * section — a small gap separates it from the read icon/value. */
+.nvme-metric-section-icon {
+    icon-size: 22px;
+    margin-right: 6px;
+}
+
 /* A single health-gauge segment: label + camembert diagram, placed on
  * the right half of the device meta line. */
 .nvme-gauge-segment {

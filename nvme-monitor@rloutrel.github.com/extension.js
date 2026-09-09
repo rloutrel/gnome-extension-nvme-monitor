@@ -671,7 +671,7 @@ const Indicator = GObject.registerClass(
                 const box = new St.BoxLayout({ x_expand: true, x_align: Clutter.ActorAlign.START });
 
                 if (section.sectionIcon) {
-                    box.add_child(this._createIcon(section.sectionIcon, SECTION_ICON_SIZE, 'nvme-info-icon'));
+                    box.add_child(this._createIcon(section.sectionIcon, SECTION_ICON_SIZE, 'nvme-metric-section-icon'));
                 }
 
                 const subBox = new St.BoxLayout({ x_expand: true, x_align: Clutter.ActorAlign.CENTER, style_class: 'nvme-metric-section' });
