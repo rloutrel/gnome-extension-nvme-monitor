@@ -76,6 +76,28 @@ const WRAPPER_PATH = '/usr/local/bin/nvme-smart-log-json';
 const UNINSTALL_PATH = '/usr/local/bin/nvme-smart-uninstall.sh';
 const SETUP_SCRIPT_NAME = 'setup-polkit.sh';
 
+const ICONS_DIR = 'icons';
+const ICONS_BOOTSTRAP = 'bootstrap';
+const ICON_EXTENSION = '.svg';
+
+// Bundled SVG icons (shipped in icons/bootstrap/) referenced by bare name.
+// System fallback (not bundled) for the panel placeholder.
+const ICONS = Object.freeze({
+    NvmeFillDark: 'nvme-fill-dark',
+    NvmeDark: 'nvme-dark',
+    Nvme: 'nvme',
+    ThermometerLow: 'thermometer-low',
+    ThermometerHalf: 'thermometer-half',
+    ThermometerHigh: 'thermometer-high',
+    PanelFallback: 'drive-harddisk-symbolic',
+});
+
+// Build a Gio.FileIcon from an absolute path, or null if the file is missing.
+function fileIcon(iconPath) {
+    if (!GLib.file_test(iconPath, GLib.FileTest.EXISTS)) return null;
+    return new Gio.FileIcon({ file: Gio.File.new_for_path(iconPath) });
+}
+
 function isV2Installed() {
     return GLib.file_test(WRAPPER_PATH, GLib.FileTest.EXISTS);
 }
@@ -134,11 +156,11 @@ const Indicator = GObject.registerClass(
             // Panel icon — container for two icons side-by-side for comparison.
             this._iconBox = new St.BoxLayout({ style_class: 'nvme-icon-compare' });
             this._panelIconFill = new St.Icon({
-                icon_name: 'drive-harddisk-symbolic',
+                icon_name: ICONS.PanelFallback,
                 style_class: 'system-status-icon',
             });
             this._panelIconOutline = new St.Icon({
-                icon_name: 'drive-harddisk-symbolic',
+                icon_name: ICONS.PanelFallback,
                 style_class: 'system-status-icon',
             });
             this._iconBox.add_child(this._panelIconFill);
@@ -147,6 +169,7 @@ const Indicator = GObject.registerClass(
 
             // Cached device icon (loaded in _setupIcon)
             this._deviceIcon = null;
+            this._iconCache = {};
             // Cached NVMe device list (fetched once)
             this._cachedDevices = null;
 
@@ -216,39 +239,25 @@ const Indicator = GObject.registerClass(
         // Left: nvme-fill-dark.svg (filled), Right: nvme-dark.svg (outline).
         // -------------------------------------------------------------------
         _setupIcon() {
-            const iconDir = GLib.build_filenamev([this._extensionPath || '', 'icons', 'bootstrap']);
-
-            const fillPath = GLib.build_filenamev([iconDir, 'nvme-fill-dark.svg']);
-            const outlinePath = GLib.build_filenamev([iconDir, 'nvme-dark.svg']);
-
-            if (GLib.file_test(fillPath, GLib.FileTest.EXISTS)) {
-                this._panelIconFill.set_gicon(new Gio.FileIcon({
-                    file: Gio.File.new_for_path(fillPath),
-                }));
-                _log(`Panel icon (fill) loaded: ${fillPath}`);
+            const fillIcon = this._loadIconByName(ICONS.NvmeFillDark);
+            if (fillIcon) {
+                this._panelIconFill.set_gicon(fillIcon);
+                _log(`Panel icon (fill) loaded: ${ICONS.NvmeFillDark}`);
             } else {
-                _log(`Panel icon (fill) not found: ${fillPath}`);
+                _log(`Panel icon (fill) not found: ${ICONS.NvmeFillDark}`);
             }
 
-            if (GLib.file_test(outlinePath, GLib.FileTest.EXISTS)) {
-                this._panelIconOutline.set_gicon(new Gio.FileIcon({
-                    file: Gio.File.new_for_path(outlinePath),
-                }));
-                _log(`Panel icon (outline) loaded: ${outlinePath}`);
+            const outlineIcon = this._loadIconByName(ICONS.NvmeDark);
+            if (outlineIcon) {
+                this._panelIconOutline.set_gicon(outlineIcon);
+                _log(`Panel icon (outline) loaded: ${ICONS.NvmeDark}`);
             } else {
-                _log(`Panel icon (outline) not found: ${outlinePath}`);
+                _log(`Panel icon (outline) not found: ${ICONS.NvmeDark}`);
             }
 
             // Cache the device icon for menu headers.
-            const devIconPath = GLib.build_filenamev([iconDir, 'nvme-dark.svg']);
-            if (GLib.file_test(devIconPath, GLib.FileTest.EXISTS)) {
-                this._deviceIcon = new Gio.FileIcon({ file: Gio.File.new_for_path(devIconPath) });
-            } else {
-                const devFallback = GLib.build_filenamev([iconDir, 'nvme.svg']);
-                this._deviceIcon = GLib.file_test(devFallback, GLib.FileTest.EXISTS)
-                    ? new Gio.FileIcon({ file: Gio.File.new_for_path(devFallback) })
-                    : null;
-            }
+            this._deviceIcon = this._loadIconByName(ICONS.NvmeDark)
+                || this._loadIconByName(ICONS.Nvme);
         }
 
         // -------------------------------------------------------------------
@@ -331,12 +340,7 @@ const Indicator = GObject.registerClass(
 
             // Load device icon (cached).
             if (!this._deviceIcon) {
-                const iconPath = GLib.build_filenamev([this._extensionPath || '', 'icons', 'bootstrap', 'nvme.svg']);
-                if (GLib.file_test(iconPath, GLib.FileTest.EXISTS)) {
-                    this._deviceIcon = new Gio.FileIcon({
-                        file: Gio.File.new_for_path(iconPath),
-                    });
-                }
+                this._deviceIcon = this._loadIconByName(ICONS.Nvme);
             }
 
             // --- Step 1: get cached NVMe devices ---
@@ -412,24 +416,36 @@ const Indicator = GObject.registerClass(
         // Load a bundled icon by name from icons/bootstrap/ as a GIcon.
         // Returns a cached Gio.FileIcon, or null if the file is missing.
         // `iconName` is the bare icon name (no extension), e.g.
-        // 'thermometer-low', resolved to icons/bootstrap/thermometer-low.svg.
+        // ICONS.ThermometerLow, resolved to icons/bootstrap/thermometer-low.svg.
         // -------------------------------------------------------------------
         _loadIconByName(iconName) {
             if (!iconName) return null;
-            if (this._iconCache === undefined) this._iconCache = {};
             if (iconName in this._iconCache) return this._iconCache[iconName];
 
             const iconPath = GLib.build_filenamev([
-                this._extensionPath || '', 'icons', 'bootstrap', `${iconName}.svg`,
+                this._extensionPath || '', ICONS_DIR, ICONS_BOOTSTRAP,
+                `${iconName}${ICON_EXTENSION}`,
             ]);
-            if (!GLib.file_test(iconPath, GLib.FileTest.EXISTS)) {
+            const gicon = fileIcon(iconPath);
+            if (gicon === null) {
                 _log(`icon not found: ${iconPath}`);
-                this._iconCache[iconName] = null;
-                return null;
             }
-            const gicon = new Gio.FileIcon({ file: Gio.File.new_for_path(iconPath) });
             this._iconCache[iconName] = gicon;
             return gicon;
+        }
+
+        // -------------------------------------------------------------------
+        // Build an St.Icon for a bundled icon name: GIcon when the bundled SVG
+        // exists, falling back to icon_name (system theme) otherwise.
+        // -------------------------------------------------------------------
+        _createIcon(iconName, iconSize = 16, styleClass = 'nvme-info-icon') {
+            const gicon = this._loadIconByName(iconName);
+            return new St.Icon({
+                gicon,
+                icon_name: gicon ? null : iconName,
+                icon_size: iconSize,
+                style_class: styleClass,
+            });
         }
 
         // -------------------------------------------------------------------
@@ -443,17 +459,7 @@ const Indicator = GObject.registerClass(
             }
             // Prepend icon if provided
             if (iconName) {
-                const gicon = this._loadIconByName(iconName);
-                const iconProps = {
-                    icon_size: 16,
-                    style_class: 'nvme-info-icon',
-                };
-                if (gicon) {
-                    iconProps.gicon = gicon;
-                } else {
-                    iconProps.icon_name = iconName;
-                }
-                const icon = new St.Icon(iconProps);
+                const icon = this._createIcon(iconName);
                 // Insert icon at the beginning of the item's children
                 const children = item.get_children();
                 if (children.length > 0) {
@@ -476,11 +482,11 @@ const Indicator = GObject.registerClass(
                 return null;
             }
             if (tempCelsius < 40) {
-                return 'thermometer-low';
+                return ICONS.ThermometerLow;
             } else if (tempCelsius < 60) {
-                return 'thermometer-half';
+                return ICONS.ThermometerHalf;
             } else {
-                return 'thermometer-high';
+                return ICONS.ThermometerHigh;
             }
         }
 
