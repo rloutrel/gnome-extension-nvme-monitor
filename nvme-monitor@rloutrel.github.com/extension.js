@@ -488,7 +488,13 @@ const Indicator = GObject.registerClass(
             item.add_child(meta);
 
             if (gauges && gauges.length > 0) {
-                const right = new St.BoxLayout({ x_expand: true, x_align: Clutter.ActorAlign.END });
+                const right = new St.BoxLayout({
+                    vertical: true,
+                    x_expand: true,
+                    x_align: Clutter.ActorAlign.END,
+                    y_align: Clutter.ActorAlign.CENTER,
+                    style_class: 'nvme-gauge-stack',
+                });
                 for (const g of gauges) {
                     right.add_child(this._gaugeSegment(g));
                 }

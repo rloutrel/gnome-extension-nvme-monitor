@@ -92,3 +92,9 @@
 .nvme-gauge-segment {
     spacing: 6px;
 }
+
+/* Stack of health gauges (Available Spare over Percentage Used),
+ * one above the other, right-aligned on the right half of the meta line. */
+.nvme-gauge-stack {
+    spacing: 2px;
+}
