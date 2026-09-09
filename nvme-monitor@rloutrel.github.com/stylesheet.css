@@ -6,11 +6,6 @@
  * ---------------------------------------------------------------------------
  */
 
-/* Panel icon comparison: side-by-side */
-.nvme-icon-compare {
-    spacing: 4px;
-}
-
 /* Info line icon */
 .nvme-info-icon {
     icon-size: 16px;

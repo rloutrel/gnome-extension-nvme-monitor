@@ -83,7 +83,6 @@ const ICON_EXTENSION = '.svg';
 // Bundled SVG icons (shipped in icons/bootstrap/) referenced by bare name.
 // System fallback (not bundled) for the panel placeholder.
 const ICONS = Object.freeze({
-    NvmeFillDark: 'nvme-fill-dark',
     NvmeDark: 'nvme-dark',
     Nvme: 'nvme',
     ThermometerLow: 'thermometer-low',
@@ -153,19 +152,12 @@ const Indicator = GObject.registerClass(
         _init() {
             super._init(0.0, _('NVMe Monitor'));
 
-            // Panel icon — container for two icons side-by-side for comparison.
-            this._iconBox = new St.BoxLayout({ style_class: 'nvme-icon-compare' });
-            this._panelIconFill = new St.Icon({
+            // Panel icon — single NVMe outline icon.
+            this._panelIcon = new St.Icon({
                 icon_name: ICONS.PanelFallback,
                 style_class: 'system-status-icon',
             });
-            this._panelIconOutline = new St.Icon({
-                icon_name: ICONS.PanelFallback,
-                style_class: 'system-status-icon',
-            });
-            this._iconBox.add_child(this._panelIconFill);
-            this._iconBox.add_child(this._panelIconOutline);
-            this.add_child(this._iconBox);
+            this.add_child(this._panelIcon);
 
             // Cached device icon (loaded in _setupIcon)
             this._deviceIcon = null;
@@ -235,29 +227,20 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
-        // Load the two NVMe SVG icons for comparison in the panel.
-        // Left: nvme-fill-dark.svg (filled), Right: nvme-dark.svg (outline).
+        // Load the NVMe SVG icon for the panel (outline).
         // -------------------------------------------------------------------
         _setupIcon() {
-            const fillIcon = this._loadIconByName(ICONS.NvmeFillDark);
-            if (fillIcon) {
-                this._panelIconFill.set_gicon(fillIcon);
-                _log(`Panel icon (fill) loaded: ${ICONS.NvmeFillDark}`);
+            const panelIcon = this._loadIconByName(ICONS.NvmeDark)
+                || this._loadIconByName(ICONS.Nvme);
+            if (panelIcon) {
+                this._panelIcon.set_gicon(panelIcon);
+                _log(`Panel icon loaded: ${ICONS.NvmeDark}`);
             } else {
-                _log(`Panel icon (fill) not found: ${ICONS.NvmeFillDark}`);
-            }
-
-            const outlineIcon = this._loadIconByName(ICONS.NvmeDark);
-            if (outlineIcon) {
-                this._panelIconOutline.set_gicon(outlineIcon);
-                _log(`Panel icon (outline) loaded: ${ICONS.NvmeDark}`);
-            } else {
-                _log(`Panel icon (outline) not found: ${ICONS.NvmeDark}`);
+                _log(`Panel icon not found: ${ICONS.NvmeDark}`);
             }
 
             // Cache the device icon for menu headers.
-            this._deviceIcon = this._loadIconByName(ICONS.NvmeDark)
-                || this._loadIconByName(ICONS.Nvme);
+            this._deviceIcon = panelIcon;
         }
 
         // -------------------------------------------------------------------
