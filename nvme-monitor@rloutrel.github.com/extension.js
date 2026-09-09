@@ -9,6 +9,31 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+// ---------------------------------------------------------------------------
+// Reusable icon loader: build an St.Icon from an SVG shipped in the
+// extension's icons/ directory.
+//
+// `extensionDir` is the extension install directory (this.path on the
+// Extension). `relPath` is the icon path relative to that directory (e.g.
+// 'icons/bootstrap/thermometer-half.svg'). `iconClass` is the St style class
+// (e.g. 'system-status-icon', 'popup-menu-icon').
+//
+// Uses Gio.FileIcon (GIcon from a local file) instead of icon_name, because
+// icon_name only resolves against the system icon theme, not the extension's
+// bundled icons.
+// ---------------------------------------------------------------------------
+function loadExtensionIcon(extensionDir, relPath, iconClass, iconSize) {
+    const iconPath = GLib.build_filenamev([extensionDir, relPath]);
+    if (!GLib.file_test(iconPath, GLib.FileTest.EXISTS)) {
+        console.log(`[explore-ui] icon not found: ${iconPath}`);
+        return null;
+    }
+    const gicon = new Gio.FileIcon({ file: Gio.File.new_for_path(iconPath) });
+    const props = { gicon, style_class: iconClass };
+    if (iconSize !== undefined) props.icon_size = iconSize;
+    return new St.Icon(props);
+}
+
 // Import Switch from GNOME Shell UI - using synchronous import
 let Switch = null;
 try {
@@ -142,13 +167,24 @@ function readSmartLogSync(devicePath) {
 
 const Indicator = GObject.registerClass(
     class Indicator extends PanelMenu.Button {
-        _init() {
+        _init(extensionPath) {
             super._init(0.0, _('My Shiny Indicator'));
 
-            this.add_child(new St.Icon({
-                icon_name: 'face-smile-symbolic',
-                style_class: 'system-status-icon',
-            }));
+            this._extensionPath = extensionPath || '';
+
+            this._panelIcon = loadExtensionIcon(
+                this._extensionPath,
+                'icons/bootstrap/nvme.svg',
+                'system-status-icon'
+            );
+            if (this._panelIcon) {
+                this.add_child(this._panelIcon);
+            } else {
+                this.add_child(new St.Icon({
+                    icon_name: 'face-smile-symbolic',
+                    style_class: 'system-status-icon',
+                }));
+            }
 
             // NVMe devices - fetched once
             this._nvmeDevices = [];
@@ -157,6 +193,15 @@ const Indicator = GObject.registerClass(
             // Temperature display as menu item
             this._tempMenuItem = new PopupMenu.PopupMenuItem(_('NVMe: Loading...'));
             this._tempMenuItem.label_actor.set_style('font-weight: bold;');
+            this._tempIcon = loadExtensionIcon(
+                this._extensionPath,
+                'icons/bootstrap/thermometer-half.svg',
+                'popup-menu-icon',
+                16
+            );
+            if (this._tempIcon) {
+                this._tempMenuItem.insert_child_below(this._tempIcon, this._tempMenuItem.label_actor);
+            }
             this.menu.addMenuItem(this._tempMenuItem);
 
             // ---------------------------------------------------------------
@@ -540,9 +585,7 @@ const Indicator = GObject.registerClass(
 
 export default class IndicatorExampleExtension extends Extension {
     enable() {
-        this._indicator = new Indicator();
-        // Pass the extension path so the indicator can find setup-polkit.sh
-        this._indicator._extensionPath = this.path;
+        this._indicator = new Indicator(this.path);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
     }
 
