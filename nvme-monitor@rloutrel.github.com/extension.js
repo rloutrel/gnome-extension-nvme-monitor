@@ -63,6 +63,18 @@ const ICONS_DIR = 'icons';
 const ICONS_BOOTSTRAP = 'bootstrap';
 const ICON_EXTENSION = '.svg';
 
+// Temperature thresholds (°C) for the heuristic green/orange tiers.
+// The red tier is driven by the drive's own critical_warning signal, not a
+// guessed °C value (see CRITICAL_WARNING_TEMP). 70°C aligns with where most
+// consumer NVMe drives begin thermal throttling.
+const TEMP_WARM_C = 50;
+const TEMP_HOT_C = 70;
+
+// NVMe SMART critical_warning bitmap (Log Page 02h). Bit 1 signals the
+// controller's configured temperature threshold was exceeded — the
+// manufacturer-true over-temperature signal.
+const CRITICAL_WARNING_TEMP = 0x02;
+
 // Bundled SVG icons (shipped in icons/bootstrap/) referenced by bare name.
 // System fallback (not bundled) for the panel placeholder.
 const ICONS = Object.freeze({
@@ -428,15 +440,21 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
-        // Get thermometer icon based on temperature range.
+        // Get thermometer icon for a temperature reading.
+        // The red tier is driven by the drive's critical_warning bit 1
+        // (controller-configured threshold exceeded), not a guessed °C value.
+        // `criticalWarning` is the raw NVMe SMART critical_warning byte.
         // ---------------------------------------------------------------------------
-        _getThermometerIcon(tempCelsius) {
+        _getThermometerIcon(tempCelsius, criticalWarning) {
             if (tempCelsius === null || tempCelsius === undefined) {
                 return null;
             }
-            if (tempCelsius < 40) {
+            if (criticalWarning & CRITICAL_WARNING_TEMP) {
+                return ICONS.ThermometerHigh;
+            }
+            if (tempCelsius < TEMP_WARM_C) {
                 return ICONS.ThermometerLow;
-            } else if (tempCelsius < 60) {
+            } else if (tempCelsius < TEMP_HOT_C) {
                 return ICONS.ThermometerHalf;
             } else {
                 return ICONS.ThermometerHigh;
@@ -444,15 +462,20 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
-        // Get temperature style class based on range.
+        // Get temperature style class. Red when the drive signals an
+        // over-threshold condition (critical_warning bit 1); otherwise the
+        // green/orange heuristic tiers.
         // ---------------------------------------------------------------------------
-        _getTempStyle(tempCelsius) {
+        _getTempStyle(tempCelsius, criticalWarning) {
             if (tempCelsius === null || tempCelsius === undefined) {
                 return 'nvme-smart-attr';
             }
-            if (tempCelsius < 40) {
+            if (criticalWarning & CRITICAL_WARNING_TEMP) {
+                return 'nvme-smart-warning-red';
+            }
+            if (tempCelsius < TEMP_WARM_C) {
                 return 'nvme-smart-attr';
-            } else if (tempCelsius < 60) {
+            } else if (tempCelsius < TEMP_HOT_C) {
                 return 'nvme-smart-warning-orange';
             } else {
                 return 'nvme-smart-warning-red';
@@ -471,8 +494,9 @@ const Indicator = GObject.registerClass(
             // Temperature Section
             // ---------------------------------------------------------------
             if (smart.temperature.composite !== null) {
-                const icon = this._getThermometerIcon(smart.temperature.composite);
-                const style = this._getTempStyle(smart.temperature.composite);
+                const cw = smart.alerts.criticalWarning || 0;
+                const icon = this._getThermometerIcon(smart.temperature.composite, cw);
+                const style = this._getTempStyle(smart.temperature.composite, cw);
 
                 if (manuf === 'Samsung' && smart.temperature.sensors.length >= 2) {
                     // Samsung: T_icon: yyy°C (controller: xxx ; NAND: zzz)
@@ -496,8 +520,8 @@ const Indicator = GObject.registerClass(
                 if (manuf !== 'Samsung' && smart.temperature.sensors.length > 0) {
                     for (let i = 0; i < smart.temperature.sensors.length; i++) {
                         const sensorTemp = smart.temperature.sensors[i];
-                        const sensorIcon = this._getThermometerIcon(sensorTemp);
-                        const sensorStyle = this._getTempStyle(sensorTemp);
+                        const sensorIcon = this._getThermometerIcon(sensorTemp, cw);
+                        const sensorStyle = this._getTempStyle(sensorTemp, cw);
                         this._addInfoLine(`  ${_('Sensor')} ${i + 1}: ${sensorTemp}°C`, sensorStyle, sensorIcon);
                     }
                 }
