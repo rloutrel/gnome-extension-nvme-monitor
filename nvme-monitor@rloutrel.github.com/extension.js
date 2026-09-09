@@ -11,6 +11,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 // Import the SMART parser
 import { parseSmart } from './smartParser.js';
+// Import endurance value formatting (pure, unit-tested)
+import { formatCompactNumber, formatDataUnits, formatPowerOnHours } from './format.js';
 // Import temperature line formatting (pure, unit-tested)
 import { formatTemperatureLine, formatSensorRows } from './tempFormat.js';
 // Import nvme-cli version detection (pure, unit-tested)
@@ -94,8 +96,8 @@ const ICONS = Object.freeze({
     ThermometerHalf: 'thermometer-half',
     ThermometerHigh: 'thermometer-high',
     Plug: 'plug',
-    Database: 'database',
-    ArrowLeftRight: 'arrow-left-right',
+    Eyeglasses: 'eyeglasses',
+    VectorPen: 'vector-pen',
     PanelFallback: 'drive-harddisk-symbolic',
 });
 
@@ -485,6 +487,94 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
+        // Attach a custom hover tooltip to an actor. GNOME 50/51 St.Widget has
+        // no native tooltip API, so this connects enter/leave/destroy events
+        // and shows a transient St.Label in Main.uiGroup near the actor.
+        // `text` is the raw value revealed on hover. Handlers are stored on the
+        // actor for cleanup.
+        // -------------------------------------------------------------------
+        _attachHoverTooltip(actor, text) {
+            if (!actor) return;
+            actor._nvmeTooltipText = text;
+            actor._nvmeTooltip = null;
+
+            const _showTooltip = (a) => {
+                if (a._nvmeTooltip || !a._nvmeTooltipText) return;
+                const label = new St.Label({
+                    text: a._nvmeTooltipText,
+                    style_class: 'nvme-hover-tooltip',
+                });
+                Main.uiGroup.add_child(label);
+                a._nvmeTooltip = label;
+
+                const [stageX, stageY] = a.get_transformed_position();
+                const [, h] = a.get_size();
+                // Position below the actor, left-aligned to its left edge.
+                let x = Math.round(stageX);
+                let y = Math.round(stageY + h + 6);
+                // Keep the tooltip on the current monitor.
+                const idx = Main.layoutManager.find_index_for_actor(a);
+                const area = Main.layoutManager.monitors[idx];
+                if (area) {
+                    const [, natWidth] = label.get_preferred_width(-1);
+                    x = Math.max(area.x, Math.min(x, area.x + area.width - natWidth));
+                    if (y + 40 > area.y + area.height) {
+                        y = Math.round(stageY) - 6 - 24;
+                    }
+                }
+                label.set_position(x, y);
+            };
+
+            const _hideTooltip = (a) => {
+                if (a._nvmeTooltip) {
+                    a._nvmeTooltip.destroy();
+                    a._nvmeTooltip = null;
+                }
+            };
+
+            const enterId = actor.connect('enter-event', () => _showTooltip(actor));
+            const leaveId = actor.connect('leave-event', () => _hideTooltip(actor));
+            const destroyId = actor.connect('destroy', () => _hideTooltip(actor));
+            actor._nvmeTooltipHandlers = [enterId, leaveId, destroyId];
+        }
+
+        // -------------------------------------------------------------------
+        // Add a non-interactive line made of icon+value segments, each with a
+        // hover tooltip revealing the raw value. `segments` is an array of
+        // { iconName, value, tooltip } objects.
+        // -------------------------------------------------------------------
+        _addMetricSegmentsLine(segments, styleClass = 'nvme-smart-attr') {
+            if (!segments || segments.length === 0) return;
+            const item = new PopupBaseMenuItem({ reactive: false, can_focus: false });
+
+            for (let i = 0; i < segments.length; i++) {
+                const seg = segments[i];
+                const iconActor = this._createIcon(seg.iconName, 16, 'nvme-info-icon');
+                if (seg.tooltip) {
+                    iconActor.reactive = true;
+                    this._attachHoverTooltip(iconActor, seg.tooltip);
+                }
+                item.add_child(iconActor);
+
+                const valueLabel = new St.Label({ text: seg.value });
+                valueLabel.add_style_class_name(styleClass);
+                valueLabel.y_align = Clutter.ActorAlign.CENTER;
+                if (seg.tooltip) {
+                    valueLabel.reactive = true;
+                    this._attachHoverTooltip(valueLabel, seg.tooltip);
+                }
+                item.add_child(valueLabel);
+
+                if (i < segments.length - 1) {
+                    const sep = new St.Label({ text: '  ', y_align: Clutter.ActorAlign.CENTER });
+                    item.add_child(sep);
+                }
+            }
+
+            this._devicesSection.addMenuItem(item);
+        }
+
+        // -------------------------------------------------------------------
         // Get thermometer icon for a temperature reading.
         // The red tier is driven by the drive's critical_warning bit 1
         // (controller-configured threshold exceeded), not a guessed °C value.
@@ -569,14 +659,18 @@ const Indicator = GObject.registerClass(
             }
 
             // ---------------------------------------------------------------
-            // Endurance Section (compact: one line per metric group)
+            // Endurance Section
             // ---------------------------------------------------------------
+            // Power line: cycles (human-readable) · hours (human-readable) ·
+            // unsafe shutdowns. Raw value revealed on hover via tooltip.
             const powerParts = [];
             if (smart.endurance.powerCycles !== undefined) {
-                powerParts.push(`${_('Power Cycles')}: ${smart.endurance.powerCycles}`);
+                powerParts.push(_('Power Cycles') + ': ' +
+                    smart.endurance.powerCycles.toLocaleString('en-US'));
             }
             if (smart.endurance.powerOnHours !== undefined) {
-                powerParts.push(`${_('Power On Hours')}: ${smart.endurance.powerOnHours}h`);
+                powerParts.push(_('Power On') + ': ' +
+                    formatPowerOnHours(smart.endurance.powerOnHours));
             }
             if (smart.endurance.unsafeShutdowns !== undefined) {
                 powerParts.push(`${_('Unsafe Shutdowns')}: ${smart.endurance.unsafeShutdowns}`);
@@ -585,29 +679,42 @@ const Indicator = GObject.registerClass(
                 this._addInfoLine(`  ${powerParts.join(' · ')}`, 'nvme-smart-attr', ICONS.Plug);
             }
 
-            const dataParts = [];
+            // Data + Host on a single line. Read uses the eyeglasses icon,
+            // write uses the vector-pen icon. The human-readable value is
+            // shown; the raw value is revealed on hover. Samsung host
+            // reads/writes (command counts) follow the same logic.
+            const segments = [];
             if (smart.endurance.dataUnitsRead !== undefined) {
-                dataParts.push(`${_('Data Read')}: ${smart.endurance.dataUnitsRead} units`);
+                segments.push({
+                    iconName: ICONS.Eyeglasses,
+                    value: formatDataUnits(smart.endurance.dataUnitsRead),
+                    tooltip: `${_('Data Read')}: ${smart.endurance.dataUnitsRead} units`,
+                });
             }
             if (smart.endurance.dataUnitsWritten !== undefined) {
-                dataParts.push(`${_('Data Written')}: ${smart.endurance.dataUnitsWritten} units`);
+                segments.push({
+                    iconName: ICONS.VectorPen,
+                    value: formatDataUnits(smart.endurance.dataUnitsWritten),
+                    tooltip: `${_('Data Written')}: ${smart.endurance.dataUnitsWritten} units`,
+                });
             }
-            if (dataParts.length > 0) {
-                this._addInfoLine(`  ${dataParts.join(' · ')}`, 'nvme-smart-attr', ICONS.Database);
-            }
-
             if (manuf === 'Samsung') {
-                const hostParts = [];
                 if (smart.endurance.hostReads !== undefined) {
-                    hostParts.push(`${_('Host Reads')}: ${smart.endurance.hostReads}`);
+                    segments.push({
+                        iconName: ICONS.Eyeglasses,
+                        value: formatCompactNumber(smart.endurance.hostReads),
+                        tooltip: `${_('Host Reads')}: ${smart.endurance.hostReads.toLocaleString('en-US')}`,
+                    });
                 }
                 if (smart.endurance.hostWrites !== undefined) {
-                    hostParts.push(`${_('Host Writes')}: ${smart.endurance.hostWrites}`);
-                }
-                if (hostParts.length > 0) {
-                    this._addInfoLine(`  ${hostParts.join(' · ')}`, 'nvme-smart-attr', ICONS.ArrowLeftRight);
+                    segments.push({
+                        iconName: ICONS.VectorPen,
+                        value: formatCompactNumber(smart.endurance.hostWrites),
+                        tooltip: `${_('Host Writes')}: ${smart.endurance.hostWrites.toLocaleString('en-US')}`,
+                    });
                 }
             }
+            this._addMetricSegmentsLine(segments);
 
             // ---------------------------------------------------------------
             // Alerts Section

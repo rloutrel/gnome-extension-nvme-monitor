@@ -53,3 +53,12 @@
     opacity: 0.5;
     font-style: italic;
 }
+
+/* Custom hover tooltip — mimics the GNOME Shell tooltip look. */
+.nvme-hover-tooltip {
+    border-radius: 8px;
+    padding: 6px 10px;
+    background-color: rgba(0, 0, 0, 0.85);
+    color: #ffffff;
+    font-size: 0.9em;
+}
