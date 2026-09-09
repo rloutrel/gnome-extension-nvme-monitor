@@ -17,9 +17,6 @@ import { parseSmart } from './smartParser.js';
 //
 
 const LOG_PREFIX = '[NVMe-monitor]';
-const LOOP_THRESHOLD = 20;          // max 20 log lines per second
-const LOOP_WINDOW_US = 1_000_000;   // 1 second in microseconds
-const LOOP_CONTEXT_LINES = 10;      // lines to dump when loop detected
 
 // Global fail counter — incremented each time "Uninstall script not found"
 // is reached.  When it reaches KILL_THRESHOLD, the extension disables itself
@@ -27,46 +24,32 @@ const LOOP_CONTEXT_LINES = 10;      // lines to dump when loop detected
 const KILL_THRESHOLD = 4;
 let _uninstallNotFoundCount = 0;
 
-const _logTimestamps = [];  // sliding window of timestamps (microseconds)
-const _logRecent = [];      // recent messages for context dump
-let _loopDetected = false;
-
-function _log(message) {
-    const text = `${LOG_PREFIX} ${message}`;
-    console.log(text);
-
-    if (_loopDetected) return;
-
-    const ts = GLib.get_monotonic_time(); // microseconds
-
-    // Sliding window: remove timestamps older than 1 second.
-    while (_logTimestamps.length > 0 && (ts - _logTimestamps[0]) > LOOP_WINDOW_US) {
-        _logTimestamps.shift();
-    }
-    _logTimestamps.push(ts);
-
-    // Keep recent messages for context.
-    _logRecent.push(message);
-    if (_logRecent.length > LOOP_CONTEXT_LINES) {
-        _logRecent.shift();
-    }
-
-    // Detect: too many calls in 1 second → loop.
-    if (_logTimestamps.length > LOOP_THRESHOLD) {
-        _loopDetected = true;
-        console.log(`${LOG_PREFIX} ⛔ LOOP DETECTED — ${_logTimestamps.length} log calls in 1 second.`);
-        console.log(`${LOG_PREFIX} ⛔ Last ${_logRecent.length} messages before detection:`);
-        for (let i = 0; i < _logRecent.length; i++) {
-            console.log(`${LOG_PREFIX} ⛔   [${i + 1}] ${_logRecent[i]}`);
-        }
-        Main.notify(`NVMe Monitor: boucle détectée — ${_logTimestamps.length} appels/seconde. Voir les logs.`);
-        return;
-    }
+// Logging helpers conforming to the GJS debugging guide:
+// https://gjs.guide/extensions/development/debugging.html#logging
+//   console.debug()  → dev-only info (GLib.LogLevelFlags.LEVEL_DEBUG)
+//   console.warn()   → unexpected errors, possible bugs (LEVEL_WARNING)
+//   console.error()  → programmer errors, failures (LEVEL_CRITICAL)
+function _debug(message) {
+    console.debug(`${LOG_PREFIX} ${message}`);
 }
 
-function logAndNotify(title, body) {
-    _log(`${title}${body ? ' — ' + body : ''}`);
-    Main.notify(title, body || '');
+function _warn(message) {
+    console.warn(`${LOG_PREFIX} ${message}`);
+}
+
+function _error(message) {
+    console.error(`${LOG_PREFIX} ${message}`);
+}
+
+function notify(title, body = '') {
+    if (body) _debug(`${title} — ${body}`);
+    else _debug(title);
+    Main.notify(title, body);
+}
+
+function notifyError(title, body = '') {
+    _warn(`${title}${body ? ' — ' + body : ''}`);
+    Main.notify(title, body);
 }
 
 // ---------------------------------------------------------------------------
@@ -169,9 +152,7 @@ const Indicator = GObject.registerClass(
             // Menu structure:
             //   [device section]  ← dynamically rebuilt on menu open
             //   [separator]
-            //   [NVMe Stack toggle]
-            //   [separator]
-            //   [Heartbeat toggle]
+            //   [Service Setup toggle]
             // ---------------------------------------------------------------
 
             // Device info section — cleared and rebuilt on each refresh.
@@ -184,18 +165,18 @@ const Indicator = GObject.registerClass(
             // v2: NVMe Stack toggle (install/uninstall)
             // ---------------------------------------------------------------
             const v2Installed = isV2Installed();
-            _log(`init: isV2Installed=${v2Installed}`);
+            _debug(`init: isV2Installed=${v2Installed}`);
 
             this._v2Updating = false;
 
-            this._v2Toggle = new PopupSwitchMenuItem(_('NVMe Stack'), v2Installed);
+            this._v2Toggle = new PopupSwitchMenuItem(_('Service Setup'), v2Installed);
 
             // If the stack is NOT installed and setup-polkit.sh is missing,
             // the user cannot install — disable the toggle entirely.
             // (check deferred to _checkSetupScript() called from enable())
 
             this._v2ToggleHandlerId = this._v2Toggle.connect('toggled', (item, state) => {
-                _log(`toggled(state=${state}) _v2Updating=${this._v2Updating}`);
+                _debug(`toggled(state=${state}) _v2Updating=${this._v2Updating}`);
                 if (this._v2Updating) return;
                 this._v2Updating = true;
 
@@ -206,17 +187,6 @@ const Indicator = GObject.registerClass(
                 }
             });
             this.menu.addMenuItem(this._v2Toggle);
-
-            // Separator
-            this.menu.addMenuItem(new PopupSeparatorMenuItem());
-
-            // Heartbeat toggle — OFF, disabled (debug placeholder)
-            this._heartbeatToggle = new PopupSwitchMenuItem(_('Heartbeat'), false);
-            this._heartbeatToggle.setSensitive(false);
-            this._heartbeatToggle.connect('toggled', (item, state) => {
-                _log(`Heartbeat toggled: ${state}`);
-            });
-            this.menu.addMenuItem(this._heartbeatToggle);
 
             // Refresh device data when the menu is opened.
             this._lastRefreshTime = 0;
@@ -234,9 +204,9 @@ const Indicator = GObject.registerClass(
                 || this._loadIconByName(ICONS.Nvme);
             if (panelIcon) {
                 this._panelIcon.set_gicon(panelIcon);
-                _log(`Panel icon loaded: ${ICONS.NvmeDark}`);
+                _debug(`Panel icon loaded: ${ICONS.NvmeDark}`);
             } else {
-                _log(`Panel icon not found: ${ICONS.NvmeDark}`);
+                _warn(`Panel icon not found: ${ICONS.NvmeDark}`);
             }
 
             // Cache the device icon for menu headers.
@@ -253,14 +223,14 @@ const Indicator = GObject.registerClass(
                 this._refreshDevices();
                 return GLib.SOURCE_CONTINUE;
             });
-            _log('Polling timer started (5s interval)');
+            _debug('Polling timer started (5s interval)');
         }
 
         _stopPolling() {
             if (this._pollingTimer) {
                 GLib.source_remove(this._pollingTimer);
                 this._pollingTimer = null;
-                _log('Polling timer stopped');
+                _debug('Polling timer stopped');
             }
         }
 
@@ -272,7 +242,7 @@ const Indicator = GObject.registerClass(
             if (isV2Installed()) return;
             const setupPath = GLib.build_filenamev([this._extensionPath || '', SETUP_SCRIPT_NAME]);
             if (!GLib.file_test(setupPath, GLib.FileTest.EXISTS)) {
-                _log(`setup-polkit.sh missing — disabling toggle`);
+                _warn('setup-polkit.sh missing — disabling toggle');
                 this._v2Toggle.setSensitive(false);
             }
         }
@@ -288,26 +258,26 @@ const Indicator = GObject.registerClass(
 
             const nvmeBin = GLib.find_program_in_path('nvme');
             if (!nvmeBin) {
-                _log('nvme-cli not found');
+                _warn('nvme-cli not found');
                 return null;
             }
 
             const listResult = runCommandSync([nvmeBin, 'list', '-o', 'json']);
-            _log(`nvme list: ok=${listResult.ok} exitCode=${listResult.exitCode} stdout_len=${listResult.stdout?.length || 0} stderr_len=${listResult.stderr?.length || 0}`);
+            _debug(`nvme list: ok=${listResult.ok} exitCode=${listResult.exitCode} stdout_len=${listResult.stdout?.length || 0} stderr_len=${listResult.stderr?.length || 0}`);
             if (!listResult.ok || listResult.exitCode !== 0) {
-                _log('Failed to list NVMe devices');
+                _warn('Failed to list NVMe devices');
                 return null;
             }
 
             try {
                 const parsed = JSON.parse(listResult.stdout);
                 this._cachedDevices = parsed.Devices || [];
-                _log(`nvme list: found ${this._cachedDevices.length} devices (cached)`);
+                _debug(`nvme list: found ${this._cachedDevices.length} devices (cached)`);
                 return this._cachedDevices;
             } catch (e) {
-                _log(`nvme list: JSON parse error: ${e.message}`);
-                _log(`nvme list: raw stdout: ${listResult.stdout?.substring(0, 200) || '(empty)'}`);
-                _log(`nvme list: raw stderr: ${listResult.stderr?.substring(0, 200) || '(empty)'}`);
+                _warn(`nvme list: JSON parse error: ${e.message}`);
+                _debug(`nvme list: raw stdout: ${listResult.stdout?.substring(0, 200) || '(empty)'}`);
+                _debug(`nvme list: raw stderr: ${listResult.stderr?.substring(0, 200) || '(empty)'}`);
                 return null;
             }
         }
@@ -411,7 +381,7 @@ const Indicator = GObject.registerClass(
             ]);
             const gicon = fileIcon(iconPath);
             if (gicon === null) {
-                _log(`icon not found: ${iconPath}`);
+                _warn(`icon not found: ${iconPath}`);
             }
             this._iconCache[iconName] = gicon;
             return gicon;
@@ -592,7 +562,7 @@ const Indicator = GObject.registerClass(
             this._v2Toggle._state = active;
             if (this._v2Toggle._switch)
                 this._v2Toggle._switch.state = active;
-            _log(`_updateV2ToggleState(${active}) — state set directly, no signal emitted`);
+            _debug(`_updateV2ToggleState(${active}) — state set directly, no signal emitted`);
         }
 
         // -------------------------------------------------------------------
@@ -600,34 +570,34 @@ const Indicator = GObject.registerClass(
         // -------------------------------------------------------------------
         _installV2Stack() {
             const setupPath = GLib.build_filenamev([this._extensionPath || '', SETUP_SCRIPT_NAME]);
-            _log(`_installV2Stack: setupPath=${setupPath}`);
+            _debug(`_installV2Stack: setupPath=${setupPath}`);
 
             if (!GLib.file_test(setupPath, GLib.FileTest.EXISTS)) {
-                _log(`setup-polkit.sh not found: ${setupPath}`);
-                Main.notify(_('setup-polkit.sh not found. Place it in the extension directory.'));
+                _warn(`setup-polkit.sh not found: ${setupPath}`);
+                notifyError(_('setup-polkit.sh not found. Place it in the extension directory.'));
                 this._v2Toggle.setSensitive(false);
                 this._v2Updating = false;
                 return;
             }
 
-            _log('Running pkexec setup-polkit.sh...');
+            _debug('Running pkexec setup-polkit.sh...');
             this._v2Toggle.setSensitive(false);
 
             const result = runPkexecSync([setupPath]);
 
             this._v2Toggle.setSensitive(true);
 
-            if (result.stderr) _log(`stderr: ${result.stderr.trim()}`);
-            if (result.stdout) _log(`stdout: ${result.stdout.trim()}`);
+            if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
+            if (result.stdout) _debug(`stdout: ${result.stdout.trim()}`);
 
             if (result.ok && result.exitCode === 0) {
-                _log('✓ Installation complete');
-                logAndNotify(_('NVMe polkit stack installed!'), _('Please log out and back in for new group membership.'));
+                _debug('Installation complete');
+                notify(_('NVMe polkit stack installed!'), _('Please log out and back in for new group membership.'));
                 this._updateV2ToggleState(true);
                 this._startPolling();
             } else {
-                _log(`✗ Installation failed (exit code ${result.exitCode})`);
-                Main.notify(_('Installation failed (exit code ') + result.exitCode + ')');
+                _warn(`Installation failed (exit code ${result.exitCode})`);
+                notifyError(_('Installation failed (exit code ') + result.exitCode + ')');
                 this._updateV2ToggleState(false);
             }
 
@@ -640,11 +610,11 @@ const Indicator = GObject.registerClass(
         _uninstallV2Stack() {
             if (!isUninstallAvailable()) {
                 _uninstallNotFoundCount++;
-                _log(`Uninstall script not found. (count=${_uninstallNotFoundCount}/${KILL_THRESHOLD})`);
+                _debug(`Uninstall script not found. (count=${_uninstallNotFoundCount}/${KILL_THRESHOLD})`);
 
                 if (_uninstallNotFoundCount >= KILL_THRESHOLD) {
-                    _log(`⛔ Kill threshold reached (${KILL_THRESHOLD}). Disabling extension to break loop.`);
-                    Main.notify(`NVMe Monitor: boucle détectée — extension désactivée.`);
+                    _error(`Kill threshold reached (${KILL_THRESHOLD}). Disabling extension to break loop.`);
+                    notifyError(`NVMe Monitor`, `Loop detected — extension disabled.`);
                     try {
                         const dbus = Gio.DBus.session;
                         dbus.call_sync(
@@ -659,35 +629,35 @@ const Indicator = GObject.registerClass(
                             null
                         );
                     } catch (e) {
-                        _log(`Could not disable via D-Bus: ${e.message}`);
+                        _warn(`Could not disable via D-Bus: ${e.message}`);
                     }
                     return;
                 }
 
-                Main.notify(_('Uninstall script not found.'));
+                notifyError(_('Uninstall script not found.'));
                 this._updateV2ToggleState(true);
                 this._v2Updating = false;
                 return;
             }
 
-            _log('Running pkexec nvme-smart-uninstall.sh...');
+            _debug('Running pkexec nvme-smart-uninstall.sh...');
             this._v2Toggle.setSensitive(false);
 
             const result = runPkexecSync([UNINSTALL_PATH]);
 
             this._v2Toggle.setSensitive(true);
 
-            if (result.stderr) _log(`stderr: ${result.stderr.trim()}`);
-            if (result.stdout) _log(`stdout: ${result.stdout.trim()}`);
+            if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
+            if (result.stdout) _debug(`stdout: ${result.stdout.trim()}`);
 
             if (result.ok && result.exitCode === 0) {
-                _log('✓ Uninstall complete');
-                logAndNotify(_('NVMe polkit stack uninstalled.'), '');
+                _debug('Uninstall complete');
+                notify(_('NVMe polkit stack uninstalled.'), '');
                 this._updateV2ToggleState(false);
                 this._stopPolling();
             } else {
-                _log(`✗ Uninstall failed (exit code ${result.exitCode})`);
-                Main.notify(_('Uninstall failed (exit code ') + result.exitCode + ')');
+                _warn(`Uninstall failed (exit code ${result.exitCode})`);
+                notifyError(_('Uninstall failed (exit code ') + result.exitCode + ')');
                 this._updateV2ToggleState(true);
             }
 
@@ -703,7 +673,7 @@ const Indicator = GObject.registerClass(
 
 export default class IndicatorExampleExtension extends Extension {
     enable() {
-        _log('enable() enter');
+        _debug('enable() enter');
         this._indicator = new Indicator();
         this._indicator._extensionPath = this.path;
         this._indicator._setupIcon();
@@ -716,11 +686,11 @@ export default class IndicatorExampleExtension extends Extension {
         // Load extension stylesheet (device header, meta lines, smart values)
         this._stylesheet = Gio.File.new_for_path(GLib.build_filenamev([this.path, 'stylesheet.css']));
         St.ThemeContext.get_for_stage(global.stage).get_theme().load_stylesheet(this._stylesheet);
-        _log('enable() exit');
+        _debug('enable() exit');
     }
 
     disable() {
-        _log('disable() enter');
+        _debug('disable() enter');
         if (this._stylesheet) {
             St.ThemeContext.get_for_stage(global.stage).get_theme().unload_stylesheet(this._stylesheet);
             this._stylesheet = null;
@@ -729,6 +699,6 @@ export default class IndicatorExampleExtension extends Extension {
             this._indicator.destroy();
         }
         this._indicator = null;
-        _log('disable() exit');
+        _debug('disable() exit');
     }
 }
