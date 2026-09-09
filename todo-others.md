@@ -1,1 +1,2 @@
 - locales to edtermine language + units (C or F, for examples)
+- config
