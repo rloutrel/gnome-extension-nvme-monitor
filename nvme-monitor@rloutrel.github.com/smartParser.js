@@ -127,10 +127,10 @@ export class BaseParser {
         if (kelvin === undefined || kelvin === null) return null;
         // If value looks like Kelvin (> 200K = -73°C), convert
         if (kelvin > 200) {
-            return Math.round(kelvin - 273.15);
+            return Math.round((kelvin - 273.15) * 10) / 10;
         }
         // Already in Celsius
-        return Math.round(kelvin);
+        return Math.round(kelvin * 10) / 10;
     }
 
     /**

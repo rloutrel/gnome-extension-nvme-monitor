@@ -11,6 +11,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 // Import the SMART parser
 import { parseSmart } from './smartParser.js';
+// Import temperature line formatting (pure, unit-tested)
+import { formatTemperatureLine, formatSensorRows } from './tempFormat.js';
 
 // ---------------------------------------------------------------------------
 // Unified logger + simple loop detector.
@@ -498,32 +500,18 @@ const Indicator = GObject.registerClass(
                 const icon = this._getThermometerIcon(smart.temperature.composite, cw);
                 const style = this._getTempStyle(smart.temperature.composite, cw);
 
-                if (manuf === 'Samsung' && smart.temperature.sensors.length >= 2) {
-                    // Samsung: T_icon: yyy°C (controller: xxx ; NAND: zzz)
-                    const sensor1 = smart.temperature.sensors[0] || '?';
-                    const sensor2 = smart.temperature.sensors[1] || '?';
-                    this._addInfoLine(
-                        `${smart.temperature.composite}°C (controller: ${sensor1} ; NAND: ${sensor2})`,
-                        style,
-                        icon
-                    );
-                } else {
-                    // Generic: T_icon: yyy°C
-                    this._addInfoLine(
-                        `${smart.temperature.composite}°C`,
-                        style,
-                        icon
-                    );
-                }
+                const line = formatTemperatureLine(
+                    manuf,
+                    smart.temperature.composite,
+                    smart.temperature.sensors
+                );
+                this._addInfoLine(line, style, icon);
 
-                // Additional sensors (if any, not Samsung or Samsung with >2 sensors)
-                if (manuf !== 'Samsung' && smart.temperature.sensors.length > 0) {
-                    for (let i = 0; i < smart.temperature.sensors.length; i++) {
-                        const sensorTemp = smart.temperature.sensors[i];
-                        const sensorIcon = this._getThermometerIcon(sensorTemp, cw);
-                        const sensorStyle = this._getTempStyle(sensorTemp, cw);
-                        this._addInfoLine(`  ${_('Sensor')} ${i + 1}: ${sensorTemp}°C`, sensorStyle, sensorIcon);
-                    }
+                // Additional sensors as separate rows (non-Samsung only).
+                for (const row of formatSensorRows(manuf, smart.temperature.sensors)) {
+                    const sensorIcon = this._getThermometerIcon(row.temp, cw);
+                    const sensorStyle = this._getTempStyle(row.temp, cw);
+                    this._addInfoLine(row.text, sensorStyle, sensorIcon);
                 }
             }
 
