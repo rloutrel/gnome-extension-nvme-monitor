@@ -18,128 +18,132 @@ msgstr ""
 
 #: extension.js:145
 msgid "nvme-cli compatibility warning"
-msgstr ""
+msgstr "Avertissement de compatibilité nvme-cli"
 
 #: extension.js:146 extension.js:203
 msgid "NVMe Monitor"
-msgstr ""
+msgstr "NVMe Monitor"
 
 #: extension.js:233
 msgid "Service Setup"
-msgstr ""
+msgstr "Configuration du service"
 
 #: extension.js:369
 msgid "nvme-cli not installed"
-msgstr ""
+msgstr "nvme-cli n'est pas installé"
 
 #: extension.js:374
 msgid "No NVMe devices found"
-msgstr ""
+msgstr "Aucun périphérique NVMe détecté"
 
 #: extension.js:415 extension.js:418
 msgid "Available Spare"
-msgstr ""
+msgstr "Spare disponible"
 
 #: extension.js:419
 msgid ""
 "Reserved capacity the drive can swap in to replace failing blocks. Red below "
 "15%, orange below 50%, green otherwise."
 msgstr ""
+"Capacité de réserve que le disque peut mobiliser pour remplacer les blocs "
+"défaillants. Rouge sous 15 %, orange sous 50 %, vert sinon."
 
 #: extension.js:426 extension.js:429
 msgid "Percentage Used"
-msgstr ""
+msgstr "Pourcentage utilisé"
 
 #: extension.js:430
 msgid ""
 "Estimated portion of the drive endurance consumed. Green below 50%, orange "
 "up to 85%, red above (inverted logic)."
 msgstr ""
+"Part estimée de l'endurance du disque consommée. Vert sous 50 %, orange "
+"jusqu'à 85 %, rouge au-delà (logique inversée)."
 
 #: extension.js:443
 msgid "  SMART: parse error"
-msgstr ""
+msgstr "  SMART : erreur d'analyse"
 
 #: extension.js:447
 msgid "  SMART: unavailable"
-msgstr ""
+msgstr "  SMART : indisponible"
 
 #: extension.js:450
 msgid "  Install NVMe Stack for SMART data"
-msgstr ""
+msgstr "  Installer la pile NVMe pour les données SMART"
 
 #: extension.js:886
 msgid "Controller"
-msgstr ""
+msgstr "Contrôleur"
 
 #: extension.js:887
 msgid "NAND"
-msgstr ""
+msgstr "NAND"
 
 #: extension.js:888
 msgid "Sensor"
-msgstr ""
+msgstr "Capteur"
 
 #: extension.js:910
 msgid "Power Cycles"
-msgstr ""
+msgstr "Cycles d'alimentation"
 
 #: extension.js:914
 msgid "Power On"
-msgstr ""
+msgstr "Mise sous tension"
 
 #: extension.js:918
 msgid "Unsafe Shutdowns"
-msgstr ""
+msgstr "Arrêts non sécurisés"
 
 #: extension.js:935
 msgid "Data Read"
-msgstr ""
+msgstr "Données lues"
 
 #: extension.js:942
 msgid "Data Written"
-msgstr ""
+msgstr "Données écrites"
 
 #: extension.js:951
 msgid "Host Reads"
-msgstr ""
+msgstr "Lectures hôte"
 
 #: extension.js:958
 msgid "Host Writes"
-msgstr ""
+msgstr "Écritures hôte"
 
 #: extension.js:968
 msgid "Media Errors"
-msgstr ""
+msgstr "Erreurs média"
 
 #: extension.js:971
 msgid "Critical Warning"
-msgstr ""
+msgstr "Avertissement critique"
 
 #: extension.js:996
 msgid "setup-polkit.sh not found. Place it in the extension directory."
-msgstr ""
+msgstr "setup-polkit.sh introuvable. Placez-le dans le répertoire de l'extension."
 
 #: extension.js:1014
 msgid "NVMe polkit stack installed!"
-msgstr ""
+msgstr "Pile polkit NVMe installée !"
 
 #: extension.js:1014
 msgid "Please log out and back in for new group membership."
-msgstr ""
+msgstr "Veuillez vous déconnecter puis reconnecter pour la nouvelle appartenance au groupe."
 
 #: extension.js:1019
 msgid "Installation failed (exit code "
-msgstr ""
+msgstr "Échec de l'installation (code de sortie "
 
 #: extension.js:1056
 msgid "Uninstall script not found."
-msgstr ""
+msgstr "Script de désinstallation introuvable."
 
 #: extension.js:1074
 msgid "NVMe polkit stack uninstalled."
-msgstr ""
+msgstr "Pile polkit NVMe désinstallée."
 
 #: extension.js:1079
 msgid "Uninstall failed (exit code "
-msgstr ""
+msgstr "Échec de la désinstallation (code de sortie "
