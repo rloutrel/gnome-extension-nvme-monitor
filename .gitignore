@@ -8,5 +8,4 @@
 nvme-monitor@rloutrel.github.com/locale/
 
 # Test coverage output (generated in CI)
-coverage/
-coverage.lcov
+lcov.info

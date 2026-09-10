@@ -16,9 +16,12 @@ jobs:
           node-version: '22'
       - name: Generate coverage
         run: |
-          mkdir -p coverage
-          NODE_V8_COVERAGE=coverage node --test "nvme-monitor@rloutrel.github.com/test/"*.test.js
-          node tools/v8ToLcov.js coverage "$PWD"
+          node --test --experimental-test-coverage \
+            --test-coverage-include="nvme-monitor@rloutrel.github.com/**/*.js" \
+            --test-coverage-exclude="**/test/**" \
+            --test-reporter=lcov \
+            --test-reporter-destination=lcov.info \
+            "nvme-monitor@rloutrel.github.com/test/"*.test.js
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6
         env:
