@@ -1,16 +1,28 @@
-import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, resolve, relative } from 'node:path';
+import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { join, resolve, relative, isAbsolute } from 'node:path';
 
 const COVERAGE_DIR = process.argv[2];
 const OUTPUT_PATH = process.argv[3];
 const SOURCE_ROOT = process.argv[4];
 
-if (!COVERAGE_DIR || !OUTPUT_PATH || !OUTPUT_PATH || !SOURCE_ROOT) {
+if (!COVERAGE_DIR || !OUTPUT_PATH || !SOURCE_ROOT) {
     console.error('Usage: node v8ToLcov.js <coverage-dir> <output-lcov> <source-root>');
     process.exit(1);
 }
 
 const sourceRoot = resolve(SOURCE_ROOT);
+const coverageDir = resolve(COVERAGE_DIR);
+const outputPath = resolve(OUTPUT_PATH);
+
+if (!isAbsolute(coverageDir) || !isAbsolute(outputPath) || !isAbsolute(sourceRoot)) {
+    console.error('Error: all paths must be absolute or resolvable to absolute.');
+    process.exit(1);
+}
+if (!existsSync(coverageDir) || !statSync(coverageDir).isDirectory()) {
+    console.error(`Error: coverage dir not found or not a directory: ${coverageDir}`);
+    process.exit(1);
+}
+
 const lcov = [];
 
 function offsetToLine(lineStarts, offset) {
@@ -31,7 +43,7 @@ function buildLineStarts(source) {
     return starts;
 }
 
-for (const file of readdirSync(COVERAGE_DIR)) {
+for (const file of readdirSync(coverageDir)) {
     if (!file.startsWith('coverage-') || !file.endsWith('.json')) continue;
     const data = JSON.parse(readFileSync(join(COVERAGE_DIR, file), 'utf8'));
 
@@ -48,8 +60,10 @@ for (const file of readdirSync(COVERAGE_DIR)) {
             continue;
         }
 
-        if (!filePath.startsWith(sourceRoot)) continue;
-        if (!existsSync(filePath)) continue;
+        const resolvedPath = resolve(filePath);
+        if (!resolvedPath.startsWith(sourceRoot)) continue;
+        if (!existsSync(resolvedPath)) continue;
+        filePath = resolvedPath;
 
         const relPath = relative(sourceRoot, filePath);
         const source = readFileSync(filePath, 'utf8');
@@ -99,5 +113,5 @@ for (const file of readdirSync(COVERAGE_DIR)) {
     }
 }
 
-writeFileSync(OUTPUT_PATH, lcov.join('\n') + '\n');
-console.log(`LCOV written to ${OUTPUT_PATH} (${lcov.filter(l => l.startsWith('SF:')).length} files)`);
+writeFileSync(outputPath, lcov.join('\n') + '\n');
+console.log(`LCOV written to ${outputPath} (${lcov.filter(l => l.startsWith('SF:')).length} files)`);
