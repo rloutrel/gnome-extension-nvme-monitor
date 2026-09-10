@@ -41,17 +41,17 @@ GROUP_NAME="nvme-smart"
 # ---------------------------------------------------------------------------
 # 0. Preflight checks
 # ---------------------------------------------------------------------------
-if [ "$(id -u)" -ne 0 ]; then
+if [[ "$(id -u)" -ne 0 ]]; then
     echo "Error: this script must be run as root (use sudo or pkexec)." >&2
     exit 1
 fi
 
 # Identify the real user who invoked this (SUDO_USER for sudo, PKEXEC_UID for pkexec)
 REAL_USER="${SUDO_USER:-}"
-if [ -z "$REAL_USER" ] && [ -n "${PKEXEC_UID:-}" ]; then
+if [[ -z "$REAL_USER" && -n "${PKEXEC_UID:-}" ]]; then
     REAL_USER="$(getent passwd "$PKEXEC_UID" | cut -d: -f1)"
 fi
-if [ -z "$REAL_USER" ]; then
+if [[ -z "$REAL_USER" ]]; then
     echo "Error: could not determine the invoking user (SUDO_USER/PKEXEC_UID)." >&2
     exit 1
 fi
