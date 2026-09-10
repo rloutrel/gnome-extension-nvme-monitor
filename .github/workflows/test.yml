@@ -17,9 +17,9 @@ jobs:
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Install ESLint
-        run: npm install
+        run: npm ci --ignore-scripts
       - name: Lint
-        run: npx eslint "nvme-monitor@rloutrel.github.com/" --ext .js
+        run: ./node_modules/.bin/eslint "nvme-monitor@rloutrel.github.com/" --ext .js
       - name: Syntax check
         run: |
           find "nvme-monitor@rloutrel.github.com" -name "*.js" -not -path "*/test/*" -print0 | xargs -0 -n1 node --check
