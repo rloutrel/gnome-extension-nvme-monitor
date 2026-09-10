@@ -3,6 +3,10 @@
 .ollamassist
 **/*.log
 
+# Node.js dev dependencies (eslint only; not shipped with the extension)
+node_modules/
+package-lock.json
+
 # Compiled gettext translations (built at pack time)
 *.mo
 nvme-monitor@rloutrel.github.com/locale/

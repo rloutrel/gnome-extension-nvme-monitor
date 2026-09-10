@@ -16,6 +16,10 @@ jobs:
           node-version: '22'
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Install ESLint
+        run: npm install
+      - name: Lint
+        run: npx eslint "nvme-monitor@rloutrel.github.com/" --ext .js
       - name: Syntax check
         run: |
           find "nvme-monitor@rloutrel.github.com" -name "*.js" -not -path "*/test/*" -print0 | xargs -0 -n1 node --check

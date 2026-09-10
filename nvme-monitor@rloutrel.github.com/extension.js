@@ -3,7 +3,6 @@ import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
-import Cairo from 'cairo';
 
 import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -398,7 +397,7 @@ const Indicator = GObject.registerClass(
                     if (smartResult.ok && smartResult.exitCode === 0) {
                         try {
                             smartObj = JSON.parse(smartResult.stdout);
-                        } catch (e) {
+                        } catch {
                             smartParseError = true;
                         }
                     }
