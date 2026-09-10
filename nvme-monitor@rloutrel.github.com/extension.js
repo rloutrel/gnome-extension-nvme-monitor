@@ -217,20 +217,20 @@ const Indicator = GObject.registerClass(
 
             // ---------------------------------------------------------------
             // Menu structure:
-            //   [Service Setup toggle]
+            //   [Enable NVMe smart-log access toggle]
             //   [separator]
             //   [device section]  ← dynamically rebuilt on menu open
             // ---------------------------------------------------------------
 
             // ---------------------------------------------------------------
-            // v2: NVMe Stack toggle (install/uninstall)
+            // v2: NVMe smart-log access toggle (install/uninstall polkit stack)
             // ---------------------------------------------------------------
             const v2Installed = isV2Installed();
             _debug(`init: isV2Installed=${v2Installed}`);
 
             this._v2Updating = false;
 
-            this._v2Toggle = new PopupSwitchMenuItem(_('Service Setup'), v2Installed);
+            this._v2Toggle = new PopupSwitchMenuItem(_('Enable NVMe smart-log access'), v2Installed);
 
             // If the stack is NOT installed and setup-polkit.sh is missing,
             // the user cannot install — disable the toggle entirely.
