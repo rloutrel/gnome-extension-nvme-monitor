@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, realpathSync, existsSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 
 const COVERAGE_DIR = process.argv[2];
@@ -11,17 +11,33 @@ if (!COVERAGE_DIR || !OUTPUT_PATH || !SOURCE_ROOT) {
 }
 
 const sourceRoot = resolve(SOURCE_ROOT);
-const coverageDir = resolve(COVERAGE_DIR);
-const outputPath = resolve(OUTPUT_PATH);
 
-if (!isAbsolute(coverageDir) || !isAbsolute(outputPath) || !isAbsolute(sourceRoot)) {
-    console.error('Error: all paths must be absolute or resolvable to absolute.');
-    process.exit(1);
+function validatePath(p, label, mustExistDir = false) {
+    const canonical = resolve(p);
+    if (!isAbsolute(canonical) || canonical.includes('..')) {
+        console.error(`Error: ${label} is not a safe absolute path: ${p}`);
+        process.exit(1);
+    }
+    if (!canonical.startsWith(sourceRoot + '/') && canonical !== sourceRoot) {
+        console.error(`Error: ${label} escapes source root: ${canonical}`);
+        process.exit(1);
+    }
+    if (mustExistDir) {
+        const real = realpathSync(canonical);
+        if (real !== canonical) {
+            console.error(`Error: ${label} contains a symlink redirect: ${canonical}`);
+            process.exit(1);
+        }
+        if (!real.startsWith(sourceRoot)) {
+            console.error(`Error: ${label} realpath escapes source root: ${real}`);
+            process.exit(1);
+        }
+    }
+    return canonical;
 }
-if (!existsSync(coverageDir) || !statSync(coverageDir).isDirectory()) {
-    console.error(`Error: coverage dir not found or not a directory: ${coverageDir}`);
-    process.exit(1);
-}
+
+const coverageDir = validatePath(COVERAGE_DIR, 'coverage dir', true);
+const outputPath = validatePath(OUTPUT_PATH, 'output path');
 
 const lcov = [];
 
