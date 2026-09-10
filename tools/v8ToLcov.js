@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, readdirSync, realpathSync, existsSync } from 'node:fs';
-import { join, resolve, relative, isAbsolute } from 'node:path';
+import { readFileSync, writeFileSync, readdirSync, realpathSync } from 'node:fs';
+import { join, resolve, relative } from 'node:path';
 
 const COVERAGE_DIR = process.argv[2];
 const OUTPUT_PATH = process.argv[3];
@@ -10,35 +10,19 @@ if (!COVERAGE_DIR || !OUTPUT_PATH || !SOURCE_ROOT) {
     process.exit(1);
 }
 
-const sourceRoot = resolve(SOURCE_ROOT);
+const sourceRoot = realpathSync(resolve(SOURCE_ROOT));
 
-function validatePath(p, label, mustExistDir = false) {
-    const canonical = resolve(p);
-    if (!isAbsolute(canonical) || canonical.includes('..')) {
-        console.error(`Error: ${label} is not a safe absolute path: ${p}`);
+function safePath(filePath, baseDir, mustExist = false) {
+    const resolved = mustExist ? realpathSync(resolve(filePath)) : resolve(filePath);
+    if (resolved !== baseDir && !resolved.startsWith(baseDir + '/')) {
+        console.error(`Error: path '${filePath}' is outside the allowed directory: ${resolved}`);
         process.exit(1);
     }
-    if (!canonical.startsWith(sourceRoot + '/') && canonical !== sourceRoot) {
-        console.error(`Error: ${label} escapes source root: ${canonical}`);
-        process.exit(1);
-    }
-    if (mustExistDir) {
-        const real = realpathSync(canonical);
-        if (real !== canonical) {
-            console.error(`Error: ${label} contains a symlink redirect: ${canonical}`);
-            process.exit(1);
-        }
-        if (!real.startsWith(sourceRoot)) {
-            console.error(`Error: ${label} realpath escapes source root: ${real}`);
-            process.exit(1);
-        }
-    }
+    return resolved;
 }
 
-validatePath(COVERAGE_DIR, 'coverage dir', true);
-validatePath(OUTPUT_PATH, 'output path');
-const coverageDir = resolve(COVERAGE_DIR);
-const outputPath = resolve(OUTPUT_PATH);
+const coverageDir = safePath(COVERAGE_DIR, sourceRoot, true);
+const outputPath = safePath(OUTPUT_PATH, sourceRoot);
 
 const lcov = [];
 
@@ -62,7 +46,7 @@ function buildLineStarts(source) {
 
 for (const file of readdirSync(coverageDir)) {
     if (!file.startsWith('coverage-') || !file.endsWith('.json')) continue;
-    const data = JSON.parse(readFileSync(join(COVERAGE_DIR, file), 'utf8'));
+    const data = JSON.parse(readFileSync(safePath(join(coverageDir, file), sourceRoot, true), 'utf8'));
 
     for (const script of data.result) {
         const url = script.url;
@@ -77,13 +61,16 @@ for (const file of readdirSync(coverageDir)) {
             continue;
         }
 
-        const resolvedPath = resolve(filePath);
-        if (!resolvedPath.startsWith(sourceRoot)) continue;
-        if (!existsSync(resolvedPath)) continue;
-        filePath = resolvedPath;
+        let resolvedPath;
+        try {
+            resolvedPath = safePath(filePath, sourceRoot, true);
+        } catch {
+            continue;
+        }
+        if (!resolvedPath) continue;
 
-        const relPath = relative(sourceRoot, filePath);
-        const source = readFileSync(filePath, 'utf8');
+        const relPath = relative(sourceRoot, resolvedPath);
+        const source = readFileSync(resolvedPath, 'utf8');
         const lineStarts = buildLineStarts(source);
 
         const allRanges = [];
@@ -130,9 +117,5 @@ for (const file of readdirSync(coverageDir)) {
     }
 }
 
-if (!outputPath.startsWith(sourceRoot) || outputPath.includes('..')) {
-    console.error(`Error: output path is invalid: ${outputPath}`);
-    process.exit(1);
-}
 writeFileSync(outputPath, lcov.join('\n') + '\n');
 console.log(`LCOV written to ${outputPath} (${lcov.filter(l => l.startsWith('SF:')).length} files)`);
