@@ -29,7 +29,7 @@ msgid "NVMe Monitor"
 msgstr ""
 
 #: extension.js:233
-msgid "Service Setup"
+msgid "Enable NVMe smart-log access"
 msgstr ""
 
 #: extension.js:369
