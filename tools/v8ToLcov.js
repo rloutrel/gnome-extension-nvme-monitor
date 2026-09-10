@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, readdirSync, realpathSync } from 'node:fs';
-import { join, resolve, relative } from 'node:path';
+import { readFileSync, writeFileSync, readdirSync, realpathSync, existsSync } from 'node:fs';
+import { join, dirname, basename, relative } from 'node:path';
 
 const COVERAGE_DIR = process.argv[2];
 const OUTPUT_PATH = process.argv[3];
@@ -10,10 +10,10 @@ if (!COVERAGE_DIR || !OUTPUT_PATH || !SOURCE_ROOT) {
     process.exit(1);
 }
 
-const sourceRoot = realpathSync(resolve(SOURCE_ROOT));
+const sourceRoot = realpathSync(SOURCE_ROOT);
 
-function safePath(filePath, baseDir, mustExist = false) {
-    const resolved = mustExist ? realpathSync(resolve(filePath)) : resolve(filePath);
+function safePath(filePath, baseDir) {
+    const resolved = realpathSync(filePath);
     if (resolved !== baseDir && !resolved.startsWith(baseDir + '/')) {
         console.error(`Error: path '${filePath}' is outside the allowed directory: ${resolved}`);
         process.exit(1);
@@ -21,8 +21,14 @@ function safePath(filePath, baseDir, mustExist = false) {
     return resolved;
 }
 
-const coverageDir = safePath(COVERAGE_DIR, sourceRoot, true);
-const outputPath = safePath(OUTPUT_PATH, sourceRoot);
+function safeNewPath(filePath, baseDir) {
+    if (existsSync(filePath)) return safePath(filePath, baseDir);
+    const parentDir = safePath(dirname(filePath), baseDir);
+    return join(parentDir, basename(filePath));
+}
+
+const coverageDir = safePath(COVERAGE_DIR, sourceRoot);
+const outputPath = safeNewPath(OUTPUT_PATH, sourceRoot);
 
 const lcov = [];
 
@@ -46,7 +52,7 @@ function buildLineStarts(source) {
 
 for (const file of readdirSync(coverageDir)) {
     if (!file.startsWith('coverage-') || !file.endsWith('.json')) continue;
-    const data = JSON.parse(readFileSync(safePath(join(coverageDir, file), sourceRoot, true), 'utf8'));
+    const data = JSON.parse(readFileSync(safePath(join(coverageDir, file), sourceRoot), 'utf8'));
 
     for (const script of data.result) {
         const url = script.url;
@@ -63,11 +69,10 @@ for (const file of readdirSync(coverageDir)) {
 
         let resolvedPath;
         try {
-            resolvedPath = safePath(filePath, sourceRoot, true);
+            resolvedPath = safePath(filePath, sourceRoot);
         } catch {
             continue;
         }
-        if (!resolvedPath) continue;
 
         const relPath = relative(sourceRoot, resolvedPath);
         const source = readFileSync(resolvedPath, 'utf8');
