@@ -38,9 +38,6 @@ UNINSTALL_RULE_FILE="10-nvme-smart-uninstall.rules"
 
 GROUP_NAME="nvme-smart"
 
-# Directory where this script lives (it ships the static templates)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
 # ---------------------------------------------------------------------------
 # 0. Preflight checks
 # ---------------------------------------------------------------------------

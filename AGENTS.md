@@ -127,7 +127,7 @@ The extension parses both layouts (`deviceList.js`) and warns affected users
 - Use `Object.freeze` for constant enums.
 - Match the existing naming: `camelCase` functions, `PascalCase` classes,
   `UPPER_SNAKE` constants.
-- Do not add dependencies. The repo uses only GObject introspection and Node's
+- Try not to add dependencies. The repo uses only GObject introspection and Node's
   built-in test runner.
 
 ## Translations (gettext)

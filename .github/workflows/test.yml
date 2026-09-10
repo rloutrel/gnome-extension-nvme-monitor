@@ -14,7 +14,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Syntax check
-        run: find "nvme-monitor@rloutrel.github.com" -name "*.js" -not -path "*/test/*" -print0 | xargs -0 -n1 node --check
+        run: |
+          find "nvme-monitor@rloutrel.github.com" -name "*.js" -not -path "*/test/*" -print0 | xargs -0 -n1 node --check
+          node --check tools/v8ToLcov.js
+      - name: Shell lint
+        run: shellcheck "nvme-monitor@rloutrel.github.com/setup-polkit.sh"
+      - name: Validate metadata
+        run: node "nvme-monitor@rloutrel.github.com/test/validateMetadata.js"
       - name: Unit tests
-        run: node --test "nvme-monitor@rloutrel.github.com/test/"*.test.js
+        run: |
+          mkdir -p coverage
+          NODE_V8_COVERAGE=coverage node --test "nvme-monitor@rloutrel.github.com/test/"*.test.js
+          node tools/v8ToLcov.js coverage coverage.lcov "$PWD"
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage.lcov

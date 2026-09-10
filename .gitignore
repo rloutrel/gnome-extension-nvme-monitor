@@ -6,3 +6,7 @@
 # Compiled gettext translations (built at pack time)
 *.mo
 nvme-monitor@rloutrel.github.com/locale/
+
+# Test coverage output (generated in CI)
+coverage/
+coverage.lcov

@@ -1,0 +1,26 @@
+name: sonarcloud
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sonarcloud:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Generate coverage
+        run: |
+          mkdir -p coverage
+          NODE_V8_COVERAGE=coverage node --test "nvme-monitor@rloutrel.github.com/test/"*.test.js
+          node tools/v8ToLcov.js coverage coverage.lcov "$PWD"
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
