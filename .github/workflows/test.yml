@@ -17,7 +17,9 @@ jobs:
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Syntax check
-        run: find "nvme-monitor@rloutrel.github.com" -name "*.js" -not -path "*/test/*" -print0 | xargs -0 -n1 node --check
+        run: |
+          find "nvme-monitor@rloutrel.github.com" -name "*.js" -not -path "*/test/*" -print0 | xargs -0 -n1 node --check
+          node --check tools/v8ToLcov.js
       - name: Shell lint
         run: shellcheck "nvme-monitor@rloutrel.github.com/setup-polkit.sh"
       - name: Validate metadata
@@ -26,7 +28,7 @@ jobs:
         run: |
           mkdir -p coverage
           NODE_V8_COVERAGE=coverage node --test "nvme-monitor@rloutrel.github.com/test/"*.test.js
-          node "nvme-monitor@rloutrel.github.com/test/v8ToLcov.js" coverage coverage.lcov "$PWD"
+          node tools/v8ToLcov.js coverage coverage.lcov "$PWD"
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

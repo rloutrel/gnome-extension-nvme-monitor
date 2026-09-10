@@ -18,7 +18,7 @@ jobs:
         run: |
           mkdir -p coverage
           NODE_V8_COVERAGE=coverage node --test "nvme-monitor@rloutrel.github.com/test/"*.test.js
-          node "nvme-monitor@rloutrel.github.com/test/v8ToLcov.js" coverage coverage.lcov "$PWD"
+          node tools/v8ToLcov.js coverage coverage.lcov "$PWD"
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
         env:
