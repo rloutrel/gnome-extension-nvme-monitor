@@ -1,0 +1,20 @@
+name: test
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts
+      - name: Syntax check
+        run: find "nvme-monitor@rloutrel.github.com" -name "*.js" -not -path "*/test/*" -print0 | xargs -0 -n1 node --check
+      - name: Unit tests
+        run: node --test "nvme-monitor@rloutrel.github.com/test/"*.test.js
