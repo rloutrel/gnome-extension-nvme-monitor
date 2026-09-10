@@ -79,7 +79,7 @@ function versionToTuple(version) {
     // Strip pre-release suffix: "3.0-rc1" → "3.0", "2.0-b.5" → "2.0".
     const base = String(version).split(/[-+]/)[0];
     const parts = base.split('.').map(p => {
-        const n = parseInt(p, 10);
+        const n = Number.parseInt(p, 10);
         return Number.isNaN(n) ? 0 : n;
     });
     while (parts.length < 3) parts.push(0);
