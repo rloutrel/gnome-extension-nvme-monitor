@@ -25,8 +25,8 @@ msgid "NVMe Monitor"
 msgstr "NVMe Monitor"
 
 #: extension.js:233
-msgid "Service Setup"
-msgstr "Configuration du service"
+msgid "Enable NVMe smart-log access"
+msgstr "Activer l'accès aux smart-logs NVMe"
 
 #: extension.js:369
 msgid "nvme-cli not installed"
