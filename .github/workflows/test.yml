@@ -28,7 +28,7 @@ jobs:
         run: |
           mkdir -p coverage
           NODE_V8_COVERAGE=coverage node --test "nvme-monitor@rloutrel.github.com/test/"*.test.js
-          node tools/v8ToLcov.js coverage coverage.lcov "$PWD"
+          node tools/v8ToLcov.js coverage "$PWD"
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

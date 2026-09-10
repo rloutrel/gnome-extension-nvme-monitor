@@ -1,12 +1,11 @@
-import { readFileSync, writeFileSync, readdirSync, realpathSync, existsSync } from 'node:fs';
-import { join, dirname, basename, relative } from 'node:path';
+import { readFileSync, writeFileSync, readdirSync, realpathSync } from 'node:fs';
+import { join, relative } from 'node:path';
 
 const COVERAGE_DIR = process.argv[2];
-const OUTPUT_PATH = process.argv[3];
-const SOURCE_ROOT = process.argv[4];
+const SOURCE_ROOT = process.argv[3];
 
-if (!COVERAGE_DIR || !OUTPUT_PATH || !SOURCE_ROOT) {
-    console.error('Usage: node v8ToLcov.js <coverage-dir> <output-lcov> <source-root>');
+if (!COVERAGE_DIR || !SOURCE_ROOT) {
+    console.error('Usage: node v8ToLcov.js <coverage-dir> <source-root>');
     process.exit(1);
 }
 
@@ -21,14 +20,8 @@ function safePath(filePath, baseDir) {
     return resolved;
 }
 
-function safeNewPath(filePath, baseDir) {
-    if (existsSync(filePath)) return safePath(filePath, baseDir);
-    const parentDir = safePath(dirname(filePath), baseDir);
-    return join(parentDir, basename(filePath));
-}
-
 const coverageDir = safePath(COVERAGE_DIR, sourceRoot);
-const outputPath = safeNewPath(OUTPUT_PATH, sourceRoot);
+const outputPath = join(sourceRoot, 'coverage.lcov');
 
 const lcov = [];
 
