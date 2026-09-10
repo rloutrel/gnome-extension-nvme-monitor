@@ -33,11 +33,12 @@ function validatePath(p, label, mustExistDir = false) {
             process.exit(1);
         }
     }
-    return canonical;
 }
 
-const coverageDir = validatePath(COVERAGE_DIR, 'coverage dir', true);
-const outputPath = validatePath(OUTPUT_PATH, 'output path');
+validatePath(COVERAGE_DIR, 'coverage dir', true);
+validatePath(OUTPUT_PATH, 'output path');
+const coverageDir = resolve(COVERAGE_DIR);
+const outputPath = resolve(OUTPUT_PATH);
 
 const lcov = [];
 
@@ -129,5 +130,9 @@ for (const file of readdirSync(coverageDir)) {
     }
 }
 
+if (!outputPath.startsWith(sourceRoot) || outputPath.includes('..')) {
+    console.error(`Error: output path is invalid: ${outputPath}`);
+    process.exit(1);
+}
 writeFileSync(outputPath, lcov.join('\n') + '\n');
 console.log(`LCOV written to ${outputPath} (${lcov.filter(l => l.startsWith('SF:')).length} files)`);
