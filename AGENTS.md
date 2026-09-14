@@ -88,6 +88,16 @@ Do **not** use `console.log`. Do not reintroduce the old loop-detector.
 - `_createIcon(name, size, styleClass)` builds an `St.Icon` with `gicon` from a
   bundled file, falling back to `icon_name` (system theme) only if missing.
 - System fallback (not bundled): `ICONS.PanelFallback = 'drive-harddisk-symbolic'`.
+- Each menu icon has a paired `-dark` SVG variant (white `fill="white"`,
+  replacing `fill="currentColor"`). On a dark GNOME menu/panel the
+  theme-aware `currentColor` icons render dark and become invisible; the
+  white-fill `-dark` SVGs stay visible. Thermometer variants keep their
+  accent fills (`darkorange`/`darkred`). Ship a new `-dark` SVG whenever you
+  add a menu icon, and register the pair in `DARK_ICON_VARIANTS`.
+- `_loadMenuIconByName(iconName)` resolves the `-dark` variant first and
+  falls back to the base icon; `_createIcon()` and the device header use it,
+  so menu icons stay visible on a dark surface. The panel icon uses
+  `ICONS.NvmeDark` directly in `_setupIcon()`.
 
 ### Temperature thresholds
 

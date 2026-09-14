@@ -94,18 +94,47 @@ const CRITICAL_WARNING_TEMP = 0x02;
 
 // Bundled SVG icons (shipped in icons/bootstrap/) referenced by bare name.
 // System fallback (not bundled) for the panel placeholder.
+//
+// Each menu icon has a paired `-dark` variant (white fill) shipped beside it.
+// On a dark GNOME menu/panel the theme-aware `currentColor` icons render dark
+// and become invisible; the white-fill `-dark` SVGs stay visible there.
+// The panel already uses ICONS.NvmeDark directly; the menu resolves the
+// `-dark` variant first and falls back to the base icon when missing.
 const ICONS = Object.freeze({
     NvmeDark: 'nvme-dark',
     Nvme: 'nvme',
     ThermometerLow: 'thermometer-low',
+    ThermometerLowDark: 'thermometer-low-dark',
     ThermometerHalf: 'thermometer-half',
+    ThermometerHalfDark: 'thermometer-half-dark',
     ThermometerHigh: 'thermometer-high',
+    ThermometerHighDark: 'thermometer-high-dark',
     Plug: 'plugin',
+    PlugDark: 'plugin-dark',
     Database: 'database',
+    DatabaseDark: 'database-dark',
     ArrowLeftRight: 'arrow-left-right',
+    ArrowLeftRightDark: 'arrow-left-right-dark',
     Eyeglasses: 'eyeglasses',
+    EyeglassesDark: 'eyeglasses-dark',
     VectorPen: 'vector-pen',
+    VectorPenDark: 'vector-pen-dark',
     PanelFallback: 'drive-harddisk-symbolic',
+});
+
+// Maps a base menu icon name to its white-fill `-dark` counterpart, used to
+// keep icons visible on a dark menu/panel surface. Add new pairs here as
+// `-dark` variants are shipped in icons/bootstrap/.
+const DARK_ICON_VARIANTS = Object.freeze({
+    [ICONS.Nvme]: ICONS.NvmeDark,
+    [ICONS.ThermometerLow]: ICONS.ThermometerLowDark,
+    [ICONS.ThermometerHalf]: ICONS.ThermometerHalfDark,
+    [ICONS.ThermometerHigh]: ICONS.ThermometerHighDark,
+    [ICONS.Plug]: ICONS.PlugDark,
+    [ICONS.Database]: ICONS.DatabaseDark,
+    [ICONS.ArrowLeftRight]: ICONS.ArrowLeftRightDark,
+    [ICONS.Eyeglasses]: ICONS.EyeglassesDark,
+    [ICONS.VectorPen]: ICONS.VectorPenDark,
 });
 
 // Build a Gio.FileIcon from an absolute path, or null if the file is missing.
@@ -357,9 +386,10 @@ const Indicator = GObject.registerClass(
             // Clear previous content.
             this._devicesSection.removeAll();
 
-            // Load device icon (cached).
+            // Load device icon (cached) — prefer the white-fill -dark
+            // variant so the header icon stays visible on a dark menu.
             if (!this._deviceIcon) {
-                this._deviceIcon = this._loadIconByName(ICONS.Nvme);
+                this._deviceIcon = this._loadMenuIconByName(ICONS.Nvme);
             }
 
             // --- Step 1: get cached NVMe devices ---
@@ -550,11 +580,29 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
+        // Load the menu icon for `iconName`, preferring its white-fill
+        // `-dark` variant (kept visible on a dark menu/panel surface) and
+        // falling back to the base icon when the variant is missing.
+        // Names already carrying the `-dark` suffix are passed through.
+        // -------------------------------------------------------------------
+        _loadMenuIconByName(iconName) {
+            if (!iconName) return null;
+            const darkName = DARK_ICON_VARIANTS[iconName];
+            if (darkName) {
+                const dark = this._loadIconByName(darkName);
+                if (dark) return dark;
+            }
+            return this._loadIconByName(iconName);
+        }
+
+        // -------------------------------------------------------------------
         // Build an St.Icon for a bundled icon name: GIcon when the bundled SVG
         // exists, falling back to icon_name (system theme) otherwise.
+        // Prefers the white-fill `-dark` variant so the icon stays visible on
+        // a dark menu surface, falling back to the base icon when absent.
         // -------------------------------------------------------------------
         _createIcon(iconName, iconSize = 16, styleClass = 'nvme-info-icon') {
-            const gicon = this._loadIconByName(iconName);
+            const gicon = this._loadMenuIconByName(iconName);
             return new St.Icon({
                 gicon,
                 icon_name: gicon ? null : iconName,
