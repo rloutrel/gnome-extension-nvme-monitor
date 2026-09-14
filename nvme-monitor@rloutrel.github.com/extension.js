@@ -14,7 +14,7 @@ import { parseSmart } from './smartParser.js';
 // Import endurance value formatting + temperature tier color (pure, unit-tested)
 import { formatCompactNumber, formatDataUnits, formatPowerOnHours, spareGaugeColor, usedGaugeColor, tempTierColor, COLOR_TRACK } from './format.js';
 // Import temperature line formatting (pure, unit-tested)
-import { formatTemperatureLine, formatSensorRows } from './tempFormat.js';
+import { formatTempCelsius, formatTemperatureLine, formatSensorRows } from './tempFormat.js';
 // Import nvme-cli version detection (pure, unit-tested)
 import {
     parseNvmeVersion,
@@ -73,7 +73,7 @@ const WRAPPER_PATH = '/usr/local/bin/nvme-smart-log-json';
 const UNINSTALL_PATH = '/usr/local/bin/nvme-smart-uninstall.sh';
 const SETUP_SCRIPT_NAME = 'setup-polkit.sh';
 
-// Persisted rolling temperature history (last minute, per device). The file
+// Persisted rolling temperature history (last 10 minutes, per device). The file
 // is written atomically by GLib.file_set_contents after each capture so a
 // crash/restart keeps the recent curve, and it is pruned on load.
 const TEMP_HISTORY_PATH = '/tmp/nvme-monitor-temp-history.json';
@@ -256,7 +256,7 @@ const Indicator = GObject.registerClass(
             // Cached NVMe device list (fetched once)
             this._cachedDevices = null;
 
-            // Rolling per-device temperature history (last minute). Loaded
+            // Rolling per-device temperature history (last 10 minutes). Loaded
             // from /tmp in enable() so a restart keeps the recent curve.
             this._tempHistory = new TempHistory({ windowMs: TEMP_HISTORY_WINDOW_MS });
             // Per-device fast (500ms) timers for drives in the critical/hot
@@ -441,7 +441,7 @@ const Indicator = GObject.registerClass(
         // Called on menu open and by the polling timer (every 5 seconds
         // when the polkit stack is installed). On each successful SMART read
         // the composite temperature is recorded into the rolling history and
-        // rendered as a last-minute line graph; devices in the red tier get a
+        // rendered as a 10-minute line graph; devices in the red tier get a
         // dedicated 500ms refresh (see _syncCriticalTimers).
         // -------------------------------------------------------------------
         _refreshDevices() {
@@ -490,7 +490,7 @@ const Indicator = GObject.registerClass(
         // -------------------------------------------------------------------
         // Render a single device (header, meta, SMART info) into the device
         // section. On a successful SMART read the composite temperature is
-        // recorded into the rolling history and a last-minute line graph is
+        // recorded into the rolling history and a 10-minute line graph is
         // added. Returns true when the device is in the red (critical/hot)
         // tier and should get a 500ms fast refresh.
         // -------------------------------------------------------------------
@@ -561,7 +561,7 @@ const Indicator = GObject.registerClass(
             }
 
             // Record the temperature reading into the rolling history and
-            // render the last-minute line graph. The red tier (drive's
+            // render the 10-minute line graph. The red tier (drive's
             // critical_warning bit 1, or composite >= TEMP_HOT_C) drives a
             // dedicated 500ms refresh for this device.
             if (parsedSmart && parsedSmart.temperature.composite !== null) {
@@ -677,12 +677,12 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
-        // Add a non-interactive last-minute temperature line graph for a
+        // Add a non-interactive last-10-minutes temperature line graph for a
         // device, drawn with St.DrawingArea / Cairo. The graph is colored by
-        // the temperature tier (mirrors the thermometer icon) and the latest
-        // reading is annotated on the right. The DrawingArea is registered in
-        // this._tempCharts so the fast critical timer can repaint it in
-        // place without rebuilding the menu.
+        // the temperature tier (mirrors the thermometer icon); the min and max
+        // temperature over the window are annotated on the left axis. The
+        // DrawingArea is registered in this._tempCharts so the fast critical
+        // timer can repaint it in place without rebuilding the menu.
         // -------------------------------------------------------------------
         _addTempChart(devicePath, criticalWarning) {
             if (!this._tempCharts) this._tempCharts = {};
@@ -692,8 +692,8 @@ const Indicator = GObject.registerClass(
             const latestTemp = latestReading ? latestReading.c : null;
             const color = tempTierColor(latestTemp, criticalWarning);
 
-            const width = 240;
-            const height = 48;
+            const width = 280;
+            const height = 64;
             const area = new St.DrawingArea({
                 width,
                 height,
@@ -719,8 +719,10 @@ const Indicator = GObject.registerClass(
 
         // -------------------------------------------------------------------
         // Cairo draw callback for the temperature line graph. Plots the
-        // composite temperature of the last minute, left = oldest, right =
-        // newest, with auto-scaled y range and a baseline grid.
+        // composite temperature of the last 10 minutes, left = oldest, right
+        // = newest, with an auto-scaled y range, a baseline grid, faint
+        // warm/hot threshold guides, and the min/max temperature values
+        // annotated on the left axis at their level with markers on the line.
         // -------------------------------------------------------------------
         _drawTempChart(area) {
             const cr = area.get_context();
@@ -729,7 +731,9 @@ const Indicator = GObject.registerClass(
             const color = area._nvmeColor || COLOR_TRACK;
             const windowMs = area._nvmeWindowMs || TEMP_HISTORY_WINDOW_MS;
 
-            const padLeft = 4;
+            // Left padding leaves room for the min/max axis labels; a little
+            // top/bottom padding keeps the line off the edges.
+            const padLeft = 30;
             const padRight = 4;
             const padTop = 4;
             const padBottom = 4;
@@ -753,6 +757,9 @@ const Indicator = GObject.registerClass(
 
             let minT = Math.min(...temps);
             let maxT = Math.max(...temps);
+            // Track the actual data min/max before padding, for the labels.
+            const dataMin = minT;
+            const dataMax = maxT;
             // Pad the y range a little so a flat line is not on the edge.
             if (maxT === minT) {
                 minT -= 1;
@@ -777,7 +784,7 @@ const Indicator = GObject.registerClass(
                 return padTop + (1 - frac) * plotH;
             };
 
-            // Faint vertical guide at the threshold lines (warm / hot).
+            // Faint horizontal guides at the threshold lines (warm / hot).
             cr.setSourceRGB(COLOR_TRACK[0], COLOR_TRACK[1], COLOR_TRACK[2]);
             cr.setLineWidth(0.5);
             for (const thresh of [TEMP_WARM_C, TEMP_HOT_C]) {
@@ -788,11 +795,12 @@ const Indicator = GObject.registerClass(
                 cr.stroke();
             }
 
-            // Temperature line + area fill.
+            // Temperature line.
             cr.setSourceRGB(color[0], color[1], color[2]);
             cr.setLineWidth(1.5);
-            cr.moveTo(padLeft, padTop + plotH);
             let started = false;
+            let minPoint = null;
+            let maxPoint = null;
             for (const r of readings) {
                 if (r.c === null || r.c === undefined || !Number.isFinite(r.c)) continue;
                 const x = xOf(r.t);
@@ -803,8 +811,30 @@ const Indicator = GObject.registerClass(
                 } else {
                     cr.lineTo(x, y);
                 }
+                if (r.c === dataMin && (!minPoint || r.t >= minPoint.t)) minPoint = { x, y };
+                if (r.c === dataMax && (!maxPoint || r.t >= maxPoint.t)) maxPoint = { x, y };
             }
             cr.stroke();
+
+            // Min / max markers and left-axis labels. Drawn after the line so
+            // they sit on top of it.
+            const labelColor = [0.85, 0.85, 0.85];
+            const MARKER_R = 2.5;
+            const drawExtremum = (pt, value) => {
+                if (!pt) return;
+                cr.setSourceRGB(color[0], color[1], color[2]);
+                cr.arc(pt.x, pt.y, MARKER_R, 0, 2 * Math.PI);
+                cr.fill();
+                cr.setSourceRGB(labelColor[0], labelColor[1], labelColor[2]);
+                cr.setLineWidth(0.5);
+                cr.arc(pt.x, pt.y, MARKER_R, 0, 2 * Math.PI);
+                cr.stroke();
+                cr.setFontSize(9);
+                cr.moveTo(2, pt.y + 3);
+                cr.showText(formatTempCelsius(value) + '\u00b0');
+            };
+            drawExtremum(minPoint, dataMin);
+            drawExtremum(maxPoint, dataMax);
 
             cr.$dispose();
         }
@@ -1480,7 +1510,7 @@ export default class IndicatorExampleExtension extends Extension {
         this._indicator._setupIcon();
         this._indicator._checkSetupScript();
         // Restore the persisted rolling temperature history from /tmp so a
-        // restart keeps the last-minute curve.
+        // restart keeps the recent 10-minute curve.
         this._indicator._loadTempHistory();
         // Detect the installed nvme-cli version once and warn if affected.
         _checkNvmeCliVersion(GLib.find_program_in_path('nvme'));

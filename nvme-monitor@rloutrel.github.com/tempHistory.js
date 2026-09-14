@@ -1,5 +1,5 @@
 /**
- * Rolling per-device temperature history (last minute).
+ * Rolling per-device temperature history (last 10 minutes).
  *
  * Pure module: no GJS/GObject imports, so it can be unit-tested with Node.
  *
@@ -7,14 +7,15 @@
  * here, keyed by device path. Each reading is a compact object:
  *   { t: number (ms epoch), c: number|null (composite °C), s: number[] (sensors °C) }
  *
- * Entries older than the rolling window (default 60s) are pruned on insert
- * and on load, so the structure always represents roughly "the last minute".
+ * Entries older than the rolling window (default 10 minutes) are pruned on
+ * insert and on load, so the structure always represents roughly "the last
+ * 10 minutes".
  *
  * Persistence is delegated to the caller: serialize() returns a JSON string
  * the caller writes to /tmp, and deserialize() rebuilds from that string.
  */
 
-const DEFAULT_WINDOW_MS = 60_000;
+const DEFAULT_WINDOW_MS = 600_000;
 
 /**
  * Per-device rolling temperature history.
@@ -27,7 +28,7 @@ const DEFAULT_WINDOW_MS = 60_000;
 export class TempHistory {
     /**
      * @param {Object} [options]
-     * @param {number} [options.windowMs=60000] - Rolling window length in ms.
+     * @param {number} [options.windowMs=600000] - Rolling window length in ms.
      */
     constructor({ windowMs = DEFAULT_WINDOW_MS } = {}) {
         this._windowMs = windowMs > 0 ? windowMs : DEFAULT_WINDOW_MS;
@@ -77,6 +78,28 @@ export class TempHistory {
         const list = this._devices.get(devicePath);
         if (!list || list.length === 0) return null;
         return list[list.length - 1];
+    }
+
+    /**
+     * Return the min and max composite temperature over the window for a
+     * device, based on the readings currently kept. Returns null when the
+     * device has no usable (finite, non-null) readings.
+     *
+     * @param {string} devicePath
+     * @returns {{min: number, max: number}|null}
+     */
+    range(devicePath) {
+        const list = this._devices.get(devicePath);
+        if (!list || list.length === 0) return null;
+        let min = Infinity;
+        let max = -Infinity;
+        for (const r of list) {
+            if (r.c === null || r.c === undefined || !Number.isFinite(r.c)) continue;
+            if (r.c < min) min = r.c;
+            if (r.c > max) max = r.c;
+        }
+        if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+        return { min, max };
     }
 
     /**

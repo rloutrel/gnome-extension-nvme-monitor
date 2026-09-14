@@ -33,8 +33,9 @@ nvme-monitor@rloutrel.github.com/
   deviceList.js         # PURE: normalize flat + nested `nvme list -o json`
                        #   layouts into a uniform device entry list.
   tempHistory.js       # PURE: rolling per-device temperature history (last
-                       #   minute) with serialize()/deserialize() for /tmp
-                       #   persistence. TempHistory ring buffer.
+                       #   10 minutes) with serialize()/deserialize() for /tmp
+                       #   persistence and range() (min/max). TempHistory ring
+                       #   buffer.
   stylesheet.css        # Theme-aware styles (no hardcoded colors).
   metadata.json         # Shell version, UUID, version.
   setup-polkit.sh       # Installs the polkit + wrapper stack (run as root).
@@ -70,10 +71,12 @@ GJS-only module), never in a pure module.
    (`/usr/local/bin/nvme-smart-log-json`), which restricts nvme-cli to
    `smart-log -o json` on `/dev/nvme*` devices only.
 6. On every successful SMART read, the composite temperature is appended to
-   the per-device rolling history (`TempHistory`, last 60s) and persisted to
-   `/tmp/nvme-monitor-temp-history.json` via `GLib.file_set_contents` (atomic).
-   The history is rendered as a last-minute line graph (`St.DrawingArea` /
-   Cairo) below each device's SMART section, colored by the temperature tier.
+   the per-device rolling history (`TempHistory`, last 10 minutes) and
+   persisted to `/tmp/nvme-monitor-temp-history.json` via
+   `GLib.file_set_contents` (atomic). The history is rendered as a 10-minute
+   line graph (`St.DrawingArea` / Cairo) below each device's SMART section,
+   colored by the temperature tier, with the min/max temperature over the
+   window annotated on the left axis (`TempHistory.range()`).
 7. Devices in the red (critical/hot) tier — `critical_warning` bit 1 set, or
    composite >= `TEMP_HOT_C` — get a per-device 500ms fast timer
    (`_syncCriticalTimers`) that re-fetches only that device's SMART, records

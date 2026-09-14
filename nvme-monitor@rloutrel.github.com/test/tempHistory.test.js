@@ -63,6 +63,47 @@ test('multiple devices are tracked independently', () => {
 });
 
 // ---------------------------------------------------------------------------
+// range (min/max over the window)
+// ---------------------------------------------------------------------------
+
+test('range returns min and max composite over the window', () => {
+    const h = new TempHistory();
+    h.add('/dev/nvme0n1', { t: 1000, c: 42, s: [] });
+    h.add('/dev/nvme0n1', { t: 2000, c: 38, s: [] });
+    h.add('/dev/nvme0n1', { t: 3000, c: 55, s: [] });
+    assert.deepEqual(h.range('/dev/nvme0n1'), { min: 38, max: 55 });
+});
+
+test('range is null for an unknown device', () => {
+    const h = new TempHistory();
+    assert.equal(h.range('/dev/nvme9n1'), null);
+});
+
+test('range is null when all readings have null/undefined composite', () => {
+    const h = new TempHistory();
+    h.add('/dev/nvme0n1', { t: 1000, c: null, s: [] });
+    h.add('/dev/nvme0n1', { t: 2000, c: undefined, s: [] });
+    assert.equal(h.range('/dev/nvme0n1'), null);
+});
+
+test('range ignores null/undefined readings when computing min/max', () => {
+    const h = new TempHistory();
+    h.add('/dev/nvme0n1', { t: 1000, c: null, s: [] });
+    h.add('/dev/nvme0n1', { t: 2000, c: 40, s: [] });
+    h.add('/dev/nvme0n1', { t: 3000, c: undefined, s: [] });
+    h.add('/dev/nvme0n1', { t: 4000, c: 60, s: [] });
+    assert.deepEqual(h.range('/dev/nvme0n1'), { min: 40, max: 60 });
+});
+
+test('range reflects only the readings kept within the window', () => {
+    const h = new TempHistory({ windowMs: 1000 });
+    h.add('/dev/nvme0n1', { t: 0, c: 10, s: [] });   // pruned by the next add
+    h.add('/dev/nvme0n1', { t: 500, c: 40, s: [] });
+    h.add('/dev/nvme0n1', { t: 1500, c: 50, s: [] });
+    assert.deepEqual(h.range('/dev/nvme0n1'), { min: 40, max: 50 });
+});
+
+// ---------------------------------------------------------------------------
 // rolling window pruning
 // ---------------------------------------------------------------------------
 
@@ -97,24 +138,24 @@ test('pruneStale drops old readings across all devices and empties devices', () 
     assert.deepEqual(h.devices(), ['/dev/nvme0n1']);
 });
 
-test('default window is 60s (last minute)', () => {
-    assert.equal(TEMP_HISTORY_WINDOW_MS, 60_000);
+test('default window is 10 minutes (600s)', () => {
+    assert.equal(TEMP_HISTORY_WINDOW_MS, 600_000);
     const h = new TempHistory();
     h.add('/dev/nvme0n1', { t: 0, c: 40, s: [] });
-    h.add('/dev/nvme0n1', { t: 59_999, c: 41, s: [] });
+    h.add('/dev/nvme0n1', { t: 599_999, c: 41, s: [] });
     assert.equal(h.get('/dev/nvme0n1').length, 2);
-    h.add('/dev/nvme0n1', { t: 60_001, c: 42, s: [] });
+    h.add('/dev/nvme0n1', { t: 600_001, c: 42, s: [] });
     assert.equal(h.get('/dev/nvme0n1').length, 2);
 });
 
-test('invalid windowMs falls back to the 60s default', () => {
+test('invalid windowMs falls back to the 10-minute default', () => {
     const h = new TempHistory({ windowMs: -5 });
     h.add('/dev/nvme0n1', { t: 0, c: 40, s: [] });
-    h.add('/dev/nvme0n1', { t: 60_001, c: 42, s: [] });
-    // Effective window is 60s (not -5), so t=0 (cutoff = 60001-60000 = 1)
-    // is pruned while t=60001 survives — proving the fallback to the default.
+    h.add('/dev/nvme0n1', { t: 600_001, c: 42, s: [] });
+    // Effective window is 600s (not -5), so t=0 (cutoff = 600001-600000 = 1)
+    // is pruned while t=600001 survives — proving the fallback to the default.
     assert.equal(h.get('/dev/nvme0n1').length, 1);
-    assert.deepEqual(h.get('/dev/nvme0n1'), [{ t: 60_001, c: 42, s: [] }]);
+    assert.deepEqual(h.get('/dev/nvme0n1'), [{ t: 600_001, c: 42, s: [] }]);
 });
 
 // ---------------------------------------------------------------------------

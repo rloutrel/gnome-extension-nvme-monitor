@@ -31,11 +31,12 @@ top-bar menu: SMART log data, temperature, endurance and critical warnings.
   menu adapts to dark/light mode automatically. No hardcoded colours.
 - **Live polling** — the menu refreshes every 5 seconds while open, so the
   values stay current without manual reopening.
-- **Last-minute temperature graph** — the composite temperature of each
-  drive is recorded on every poll into a rolling 60s history, persisted to
-  `/tmp/nvme-monitor-temp-history.json` (so a restart keeps the recent curve)
-  and shown as a line graph under the drive's SMART section, colored by the
-  temperature tier.
+- **10-minute temperature graph** — the composite temperature of each
+  drive is recorded on every poll into a rolling 10-minute history, persisted
+  to `/tmp/nvme-monitor-temp-history.json` (so a restart keeps the recent
+  curve) and shown as a line graph under the drive's SMART section, colored
+  by the temperature tier, with the **min and max** temperature over the
+  window annotated on the left axis.
 - **Adaptive refresh on critical temperature** — when a drive is in the red
   (critical/hot) tier (the drive's `critical_warning` bit 1, or composite
   ≥ 70 °C), its refresh interval drops to 0.5 s so you watch the temperature
@@ -129,8 +130,8 @@ nvme-monitor@rloutrel.github.com/
   tempFormat.js        # Temperature line formatting, pure module
   versionUtils.js      # nvme-cli version detection, pure module
   deviceList.js        # normalize nvme list -o json layouts, pure module
-  tempHistory.js       # rolling per-device temperature history (last minute),
-                      #   pure module
+  tempHistory.js       # rolling per-device temperature history (10 minutes,
+                      #   min/max range), pure module
   format.js            # endurance formatting + temperature tier color, pure
   stylesheet.css       # Theme-aware styles
   metadata.json        # Shell version, UUID, version
