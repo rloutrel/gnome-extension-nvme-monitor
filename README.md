@@ -31,6 +31,16 @@ top-bar menu: SMART log data, temperature, endurance and critical warnings.
   menu adapts to dark/light mode automatically. No hardcoded colours.
 - **Live polling** — the menu refreshes every 5 seconds while open, so the
   values stay current without manual reopening.
+- **Last-minute temperature graph** — the composite temperature of each
+  drive is recorded on every poll into a rolling 60s history, persisted to
+  `/tmp/nvme-monitor-temp-history.json` (so a restart keeps the recent curve)
+  and shown as a line graph under the drive's SMART section, colored by the
+  temperature tier.
+- **Adaptive refresh on critical temperature** — when a drive is in the red
+  (critical/hot) tier (the drive's `critical_warning` bit 1, or composite
+  ≥ 70 °C), its refresh interval drops to 0.5 s so you watch the temperature
+  curve resolve in near real time. The normal 5 s timer keeps driving the
+  full menu rebuild for everything else.
 - **nvme-cli version awareness** — detects known `nvme-cli` bugs (int32
   overflow in 2.0–2.2; the `nvme list -o json` nested-layout format change in
   2.11–2.12 and 3.0+) and parses both layouts, warning the user when needed.
@@ -113,11 +123,15 @@ pkexec /usr/local/bin/nvme-smart-uninstall.sh
 
 ```
 nvme-monitor@rloutrel.github.com/
-  extension.js        # GNOME Shell entry point: indicator, menu, polling
+  extension.js        # GNOME Shell entry point: indicator, menu, polling,
+                      #   temp history capture, line graph, adaptive refresh
   smartParser.js      # SMART log parsing (vendor parsers), pure module
   tempFormat.js        # Temperature line formatting, pure module
   versionUtils.js      # nvme-cli version detection, pure module
   deviceList.js        # normalize nvme list -o json layouts, pure module
+  tempHistory.js       # rolling per-device temperature history (last minute),
+                      #   pure module
+  format.js            # endurance formatting + temperature tier color, pure
   stylesheet.css       # Theme-aware styles
   metadata.json        # Shell version, UUID, version
   setup-polkit.sh      # Installs the polkit + wrapper stack (run as root)
@@ -129,15 +143,17 @@ screenshots/           # Screenshots referenced by this README
 ## Testing
 
 Pure modules (`smartParser.js`, `tempFormat.js`, `versionUtils.js`,
-`deviceList.js`) are unit-tested with Node's built-in test runner — no test
-framework, no dependencies:
+`deviceList.js`, `tempHistory.js`, `format.js`) are unit-tested with Node's
+built-in test runner — no test framework, no dependencies:
 
 ```bash
 node --test \
   "nvme-monitor@rloutrel.github.com/test/tempFormat.test.js" \
   "nvme-monitor@rloutrel.github.com/test/smartParser.test.js" \
   "nvme-monitor@rloutrel.github.com/test/versionUtils.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/deviceList.test.js"
+  "nvme-monitor@rloutrel.github.com/test/deviceList.test.js" \
+  "nvme-monitor@rloutrel.github.com/test/format.test.js" \
+  "nvme-monitor@rloutrel.github.com/test/tempHistory.test.js"
 ```
 
 `extension.js` runs inside GNOME Shell (GJS) and cannot be unit-tested

@@ -32,6 +32,9 @@ nvme-monitor@rloutrel.github.com/
                        #   bytes overflow). assessNvmeCliVersion().
   deviceList.js         # PURE: normalize flat + nested `nvme list -o json`
                        #   layouts into a uniform device entry list.
+  tempHistory.js       # PURE: rolling per-device temperature history (last
+                       #   minute) with serialize()/deserialize() for /tmp
+                       #   persistence. TempHistory ring buffer.
   stylesheet.css        # Theme-aware styles (no hardcoded colors).
   metadata.json         # Shell version, UUID, version.
   setup-polkit.sh       # Installs the polkit + wrapper stack (run as root).
@@ -41,9 +44,9 @@ nvme-monitor@rloutrel.github.com/
 
 ### Pure vs GJS modules
 
-A hard rule: **`smartParser.js`, `tempFormat.js`, `versionUtils.js`, and
-`deviceList.js` are pure modules with zero GJS/GObject imports.** They run
-under plain Node and are unit-tested there. Do **not** add `gi://` or
+A hard rule: **`smartParser.js`, `tempFormat.js`, `versionUtils.js`,
+`deviceList.js`, and `tempHistory.js` are pure modules with zero GJS/GObject
+imports.** They run under plain Node and are unit-tested there. Do **not** add `gi://` or
 `resource:///` imports to these files. Anything that touches `Gio`, `GLib`,
 `St`, `Clutter`, `Main`, or GObject belongs in `extension.js` (or a future
 GJS-only module), never in a pure module.
@@ -51,7 +54,9 @@ GJS-only module), never in a pure module.
 ### Data flow
 
 1. `enable()` builds the `Indicator`, loads the panel icon, runs the nvme-cli
-   version check, and starts polling if the polkit stack is installed.
+   version check, restores the persisted rolling temperature history from
+   `/tmp/nvme-monitor-temp-history.json`, and starts polling if the polkit
+   stack is installed.
 2. On menu open (or every 5s while polling), `_refreshDevices()` rebuilds the
    device section.
 3. `_fetchAndCacheDevices()` runs `nvme list -o json` once and caches the result.
@@ -64,6 +69,16 @@ GJS-only module), never in a pure module.
 5. SMART data is fetched via the polkit wrapper
    (`/usr/local/bin/nvme-smart-log-json`), which restricts nvme-cli to
    `smart-log -o json` on `/dev/nvme*` devices only.
+6. On every successful SMART read, the composite temperature is appended to
+   the per-device rolling history (`TempHistory`, last 60s) and persisted to
+   `/tmp/nvme-monitor-temp-history.json` via `GLib.file_set_contents` (atomic).
+   The history is rendered as a last-minute line graph (`St.DrawingArea` /
+   Cairo) below each device's SMART section, colored by the temperature tier.
+7. Devices in the red (critical/hot) tier — `critical_warning` bit 1 set, or
+   composite >= `TEMP_HOT_C` — get a per-device 500ms fast timer
+   (`_syncCriticalTimers`) that re-fetches only that device's SMART, records
+   the temperature, persists, and repaints its graph in place, without
+   rebuilding the menu. The normal 5s timer keeps driving the full rebuild.
 
 ## Conventions
 
@@ -179,7 +194,9 @@ node --test \
   "nvme-monitor@rloutrel.github.com/test/tempFormat.test.js" \
   "nvme-monitor@rloutrel.github.com/test/smartParser.test.js" \
   "nvme-monitor@rloutrel.github.com/test/versionUtils.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/deviceList.test.js"
+  "nvme-monitor@rloutrel.github.com/test/deviceList.test.js" \
+  "nvme-monitor@rloutrel.github.com/test/format.test.js" \
+  "nvme-monitor@rloutrel.github.com/test/tempHistory.test.js"
 ```
 
 - Use `node:test` + `node:assert/strict`.

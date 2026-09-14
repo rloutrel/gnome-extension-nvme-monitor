@@ -105,3 +105,12 @@
 .nvme-gauge-stack {
     spacing: 2px;
 }
+/* Last-minute temperature line graph (St.DrawingArea / Cairo), drawn
+ * below a device SMART section. The graph is drawn in code; this class
+ * only adds horizontal padding so it aligns with the menu text. */
+.nvme-temp-chart {
+    margin-left: 28px;
+    margin-right: 8px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}

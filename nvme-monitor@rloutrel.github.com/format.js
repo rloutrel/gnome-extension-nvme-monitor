@@ -97,5 +97,29 @@ export function usedGaugeColor(percent) {
     return COLOR_GREEN;
 }
 
+// Temperature tier thresholds (°C) for the line-graph color coding. These
+// mirror the heuristic tiers in extension.js (TEMP_WARM_C / TEMP_HOT_C); the
+// red tier is also taken when the drive signals over-temperature via its
+// critical_warning bit 1.
+const TEMP_WARM_C = 50;
+const TEMP_HOT_C = 70;
+
+/**
+ * Color for a temperature reading, mirroring the menu thermometer tiers.
+ * Pass the raw critical_warning byte so the manufacturer-true over-temperature
+ * signal drives the red tier rather than a guessed °C value.
+ *
+ * @param {number|null|undefined} tempCelsius
+ * @param {number} [criticalWarning] - Raw NVMe SMART critical_warning byte.
+ * @returns {number[]} [r, g, b]
+ */
+export function tempTierColor(tempCelsius, criticalWarning = 0) {
+    if (tempCelsius === null || tempCelsius === undefined) return COLOR_TRACK;
+    if (criticalWarning & 0x02) return COLOR_RED;
+    if (tempCelsius < TEMP_WARM_C) return COLOR_GREEN;
+    if (tempCelsius < TEMP_HOT_C) return COLOR_ORANGE;
+    return COLOR_RED;
+}
+
 export { COLOR_TRACK };
 
