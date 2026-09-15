@@ -76,7 +76,12 @@ GJS-only module), never in a pure module.
    `GLib.file_set_contents` (atomic). The history is rendered as a 10-minute
    line graph (`St.DrawingArea` / Cairo) below each device's SMART section,
    colored by the temperature tier, with the min/max temperature over the
-   window annotated on the left axis (`TempHistory.range()`).
+   window annotated on the left axis (`TempHistory.range()`). The max marker
+   is tinted by its own temperature tier; intermediate thresholds (warm/hot)
+   crossed at least once (`crossedThresholds()`) are drawn as tier-colored
+   guides, and a right-side time counter shows how long the temperature stayed
+   at/above each crossed threshold (`computeTimeAboveThresholds()`, linearly
+   interpolated, and `formatDurationMs()`).
 7. Devices in the red (critical/hot) tier — `critical_warning` bit 1 set, or
    composite >= `TEMP_HOT_C` — get a per-device 500ms fast timer
    (`_syncCriticalTimers`) that re-fetches only that device's SMART, records

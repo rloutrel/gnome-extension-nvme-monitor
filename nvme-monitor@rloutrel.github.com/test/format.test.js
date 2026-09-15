@@ -173,3 +173,38 @@ test('tempTierColor: track color for null/undefined temperature', () => {
     assert.deepEqual(tempTierColor(null), COLOR_TRACK);
     assert.deepEqual(tempTierColor(undefined), COLOR_TRACK);
 });
+
+// ---------------------------------------------------------------------------
+// formatDurationMs
+// ---------------------------------------------------------------------------
+import { formatDurationMs } from '../format.js';
+
+test('formatDurationMs: zero and negative give 0s', () => {
+    assert.equal(formatDurationMs(0), '0s');
+    assert.equal(formatDurationMs(-5), '0s');
+});
+
+test('formatDurationMs: sub-second non-zero rounds up to 1s', () => {
+    assert.equal(formatDurationMs(100), '1s');
+    assert.equal(formatDurationMs(999), '1s');
+});
+
+test('formatDurationMs: seconds under a minute', () => {
+    assert.equal(formatDurationMs(5000), '5s');
+    assert.equal(formatDurationMs(42000), '42s');
+    assert.equal(formatDurationMs(59000), '59s');
+});
+
+test('formatDurationMs: minutes with seconds', () => {
+    assert.equal(formatDurationMs(65000), '1m 5s');
+    assert.equal(formatDurationMs(125000), '2m 5s');
+});
+
+test('formatDurationMs: whole minutes omit seconds', () => {
+    assert.equal(formatDurationMs(60000), '1m');
+    assert.equal(formatDurationMs(120000), '2m');
+});
+
+test('formatDurationMs: non-finite gives 0s', () => {
+    assert.equal(formatDurationMs(NaN), '0s');
+});

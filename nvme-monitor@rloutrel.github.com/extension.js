@@ -12,7 +12,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 // Import the SMART parser
 import { parseSmart } from './smartParser.js';
 // Import endurance value formatting + temperature tier color (pure, unit-tested)
-import { formatCompactNumber, formatDataUnits, formatPowerOnHours, spareGaugeColor, usedGaugeColor, tempTierColor, COLOR_TRACK } from './format.js';
+import { formatCompactNumber, formatDataUnits, formatPowerOnHours, spareGaugeColor, usedGaugeColor, tempTierColor, formatDurationMs, COLOR_TRACK, COLOR_ORANGE, COLOR_RED } from './format.js';
 // Import temperature line formatting (pure, unit-tested)
 import { formatTempCelsius, formatTemperatureLine, formatSensorRows } from './tempFormat.js';
 // Import nvme-cli version detection (pure, unit-tested)
@@ -24,7 +24,7 @@ import {
 // Import device-list normalization for both flat and nested JSON layouts (pure)
 import { normalizeDeviceList } from './deviceList.js';
 // Import rolling per-device temperature history (pure, unit-tested).
-import { TempHistory, TEMP_HISTORY_WINDOW_MS } from './tempHistory.js';
+import { TempHistory, TEMP_HISTORY_WINDOW_MS, computeTimeAboveThresholds, crossedThresholds } from './tempHistory.js';
 
 // ---------------------------------------------------------------------------
 // Unified logger + simple loop detector.
@@ -692,7 +692,7 @@ const Indicator = GObject.registerClass(
             const latestTemp = latestReading ? latestReading.c : null;
             const color = tempTierColor(latestTemp, criticalWarning);
 
-            const width = 280;
+            const width = 320;
             const height = 64;
             const area = new St.DrawingArea({
                 width,
@@ -731,10 +731,11 @@ const Indicator = GObject.registerClass(
             const color = area._nvmeColor || COLOR_TRACK;
             const windowMs = area._nvmeWindowMs || TEMP_HISTORY_WINDOW_MS;
 
-            // Left padding leaves room for the min/max axis labels; a little
+            // Left padding leaves room for the min/max axis labels; right
+            // padding leaves room for the threshold time counters. A little
             // top/bottom padding keeps the line off the edges.
             const padLeft = 30;
-            const padRight = 4;
+            const padRight = 56;
             const padTop = 4;
             const padBottom = 4;
             const plotW = Math.max(1, w - padLeft - padRight);
@@ -784,18 +785,48 @@ const Indicator = GObject.registerClass(
                 return padTop + (1 - frac) * plotH;
             };
 
-            // Faint horizontal guides at the threshold lines (warm / hot).
-            cr.setSourceRGB(COLOR_TRACK[0], COLOR_TRACK[1], COLOR_TRACK[2]);
+            // Threshold tiers, from cool to hot, with their tier color. A
+            // threshold guide is drawn only when it was crossed at least once
+            // over the window; crossed guides are tinted with their tier color
+            // so the user sees which intermediate thresholds were reached.
+            const thresholds = [
+                { value: TEMP_WARM_C, color: COLOR_ORANGE },
+                { value: TEMP_HOT_C, color: COLOR_RED },
+            ];
+            const crossed = new Set(crossedThresholds(readings, thresholds.map(t => t.value)));
+            const cw = area._nvmeCriticalWarning || 0;
+            const timeAbove = computeTimeAboveThresholds(
+                readings, thresholds.map(t => t.value));
+
+            // Faint horizontal guides at the crossed threshold lines.
             cr.setLineWidth(0.5);
-            for (const thresh of [TEMP_WARM_C, TEMP_HOT_C]) {
-                if (thresh < minT || thresh > maxT) continue;
-                const y = yOf(thresh);
+            for (const th of thresholds) {
+                if (!crossed.has(th.value)) continue;
+                if (th.value < minT || th.value > maxT) continue;
+                const y = yOf(th.value);
+                cr.setSourceRGB(th.color[0], th.color[1], th.color[2]);
                 cr.moveTo(padLeft, y);
                 cr.lineTo(padLeft + plotW, y);
                 cr.stroke();
             }
 
-            // Temperature line.
+            // Temperature line + min/max markers.
+            this._drawTempLine(cr, readings, color, xOf, yOf, dataMin, dataMax, cw);
+
+            // Right-side time counters for each crossed threshold.
+            this._drawThresholdCounters(cr, thresholds, crossed, timeAbove, padLeft, plotW, padTop);
+
+            cr.$dispose();
+        }
+
+        // -------------------------------------------------------------------
+        // Draw the temperature line and the min/max markers + left-axis labels.
+        // The max marker is tinted by its own temperature tier
+        // (green/orange/red) so an over-threshold maximum stands out; the min
+        // marker stays in the line color. `cw` is the raw critical_warning byte
+        // used to resolve the max's tier color.
+        // -------------------------------------------------------------------
+        _drawTempLine(cr, readings, color, xOf, yOf, dataMin, dataMax, cw) {
             cr.setSourceRGB(color[0], color[1], color[2]);
             cr.setLineWidth(1.5);
             let started = false;
@@ -816,13 +847,11 @@ const Indicator = GObject.registerClass(
             }
             cr.stroke();
 
-            // Min / max markers and left-axis labels. Drawn after the line so
-            // they sit on top of it.
             const labelColor = [0.85, 0.85, 0.85];
             const MARKER_R = 2.5;
-            const drawExtremum = (pt, value) => {
+            const drawExtremum = (pt, value, markerColor) => {
                 if (!pt) return;
-                cr.setSourceRGB(color[0], color[1], color[2]);
+                cr.setSourceRGB(markerColor[0], markerColor[1], markerColor[2]);
                 cr.arc(pt.x, pt.y, MARKER_R, 0, 2 * Math.PI);
                 cr.fill();
                 cr.setSourceRGB(labelColor[0], labelColor[1], labelColor[2]);
@@ -833,10 +862,29 @@ const Indicator = GObject.registerClass(
                 cr.moveTo(2, pt.y + 3);
                 cr.showText(formatTempCelsius(value) + '\u00b0');
             };
-            drawExtremum(minPoint, dataMin);
-            drawExtremum(maxPoint, dataMax);
+            drawExtremum(minPoint, dataMin, color);
+            drawExtremum(maxPoint, dataMax, tempTierColor(dataMax, cw));
+        }
 
-            cr.$dispose();
+        // -------------------------------------------------------------------
+        // Draw the right-side time counters: for each crossed threshold, show
+        // how long the temperature spent at/above it over the window, colored
+        // by the threshold tier. Stacked top-down, right-aligned.
+        // -------------------------------------------------------------------
+        _drawThresholdCounters(cr, thresholds, crossed, timeAbove, padLeft, plotW, padTop) {
+            cr.setFontSize(8);
+            let row = 0;
+            for (const th of thresholds) {
+                if (!crossed.has(th.value)) continue;
+                const ms = timeAbove[th.value] || 0;
+                const text = formatDurationMs(ms);
+                cr.setSourceRGB(th.color[0], th.color[1], th.color[2]);
+                const x = padLeft + plotW + 4;
+                const y = padTop + 9 + row * 12;
+                cr.moveTo(x, y);
+                cr.showText(`${th.value}°: ${text}`);
+                row++;
+            }
         }
 
         // -------------------------------------------------------------------

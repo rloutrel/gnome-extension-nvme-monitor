@@ -36,7 +36,12 @@ top-bar menu: SMART log data, temperature, endurance and critical warnings.
   to `/tmp/nvme-monitor-temp-history.json` (so a restart keeps the recent
   curve) and shown as a line graph under the drive's SMART section, colored
   by the temperature tier, with the **min and max** temperature over the
-  window annotated on the left axis.
+  window annotated on the left axis. The **max** marker is tinted by its own
+  temperature tier (green/orange/red) so an over-threshold peak stands out;
+  intermediate thresholds (warm 50 °C, hot 70 °C) crossed at least once are
+  drawn as tier-colored guide lines, and a **time counter** on the right
+  shows how long the temperature stayed at/above each crossed threshold
+  over the window (interpolated to account for the variable sampling rate).
 - **Adaptive refresh on critical temperature** — when a drive is in the red
   (critical/hot) tier (the drive's `critical_warning` bit 1, or composite
   ≥ 70 °C), its refresh interval drops to 0.5 s so you watch the temperature

@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TempHistory, TEMP_HISTORY_WINDOW_MS } from '../tempHistory.js';
+import { TempHistory, TEMP_HISTORY_WINDOW_MS, computeTimeAboveThresholds, crossedThresholds } from '../tempHistory.js';
 
 // ---------------------------------------------------------------------------
 // add / get / latest
@@ -204,4 +204,137 @@ test('deserialize tolerates a non-array device list entry', () => {
     const str = JSON.stringify({ windowMs: 1000, devices: { '/dev/nvme0n1': 'not-an-array' } });
     const h = TempHistory.deserialize(str);
     assert.deepEqual(h.get('/dev/nvme0n1'), []);
+});
+
+// ---------------------------------------------------------------------------
+// computeTimeAboveThresholds (interpolated)
+// ---------------------------------------------------------------------------
+
+test('computeTimeAboveThresholds: fully above a threshold for the whole span', () => {
+    const readings = [
+        { t: 0, c: 60, s: [] },
+        { t: 10000, c: 65, s: [] },
+    ];
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 10000);
+});
+
+test('computeTimeAboveThresholds: fully below a threshold', () => {
+    const readings = [
+        { t: 0, c: 30, s: [] },
+        { t: 10000, c: 35, s: [] },
+    ];
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 0);
+});
+
+test('computeTimeAboveThresholds: crossing upward interpolated at midpoint', () => {
+    // 30->70 over 10s, crossing 50 at the midpoint (5s above).
+    const readings = [
+        { t: 0, c: 30, s: [] },
+        { t: 10000, c: 70, s: [] },
+    ];
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 5000);
+});
+
+test('computeTimeAboveThresholds: crossing downward interpolated at midpoint', () => {
+    // 70->30 over 10s, crossing 50 at the midpoint (5s above).
+    const readings = [
+        { t: 0, c: 70, s: [] },
+        { t: 10000, c: 30, s: [] },
+    ];
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 5000);
+});
+
+test('computeTimeAboveThresholds: multiple thresholds sum correctly', () => {
+    // 40->80 over 10s. Crosses 50 at 25% (2.5s above 50), 70 at 75% (7.5s above 70).
+    const readings = [
+        { t: 0, c: 40, s: [] },
+        { t: 10000, c: 80, s: [] },
+    ];
+    const result = computeTimeAboveThresholds(readings, [50, 70]);
+    assert.equal(result[50], 7500);
+    assert.equal(result[70], 2500);
+});
+
+test('computeTimeAboveThresholds: null composite breaks adjacent segments', () => {
+    const readings = [
+        { t: 0, c: 60, s: [] },
+        { t: 5000, c: null, s: [] },
+        { t: 10000, c: 65, s: [] },
+    ];
+    // A null composite cannot be used as a segment endpoint, so both the
+    // 0->5000 and 5000->10000 segments are skipped (no usable span).
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 0);
+});
+
+test('computeTimeAboveThresholds: usable segments around a null are counted', () => {
+    const readings = [
+        { t: 0, c: 60, s: [] },
+        { t: 5000, c: 65, s: [] },
+        { t: 8000, c: null, s: [] },
+        { t: 12000, c: 70, s: [] },
+        { t: 16000, c: 75, s: [] },
+    ];
+    // Segments 0->5000 (5s) and 12000->16000 (4s) are usable = 9s above 50;
+    // the segments touching the null reading are skipped.
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 9000);
+});
+
+test('computeTimeAboveThresholds: empty or single reading yields zeros', () => {
+    assert.deepEqual(computeTimeAboveThresholds([], [50]), { 50: 0 });
+    assert.deepEqual(computeTimeAboveThresholds([{ t: 0, c: 60, s: [] }], [50]), { 50: 0 });
+});
+
+test('computeTimeAboveThresholds: zero/negative dt segments are skipped', () => {
+    const readings = [
+        { t: 0, c: 60, s: [] },
+        { t: 0, c: 65, s: [] },  // same timestamp -> dt=0, skipped
+    ];
+    assert.equal(computeTimeAboveThresholds(readings, [50])[50], 0);
+});
+
+// ---------------------------------------------------------------------------
+// crossedThresholds
+// ---------------------------------------------------------------------------
+
+test('crossedThresholds: returns thresholds reached at least once', () => {
+    const readings = [
+        { t: 0, c: 40, s: [] },
+        { t: 1000, c: 55, s: [] },
+        { t: 2000, c: 48, s: [] },
+    ];
+    assert.deepEqual(crossedThresholds(readings, [50, 70]), [50]);
+});
+
+test('crossedThresholds: multiple thresholds crossed', () => {
+    const readings = [
+        { t: 0, c: 40, s: [] },
+        { t: 1000, c: 75, s: [] },
+    ];
+    assert.deepEqual(crossedThresholds(readings, [50, 70]), [50, 70]);
+});
+
+test('crossedThresholds: none crossed when all below', () => {
+    const readings = [
+        { t: 0, c: 30, s: [] },
+        { t: 1000, c: 35, s: [] },
+    ];
+    assert.deepEqual(crossedThresholds(readings, [50, 70]), []);
+});
+
+test('crossedThresholds: empty readings yields none', () => {
+    assert.deepEqual(crossedThresholds([], [50, 70]), []);
+});
+
+test('crossedThresholds: ignores null/undefined composite', () => {
+    const readings = [
+        { t: 0, c: null, s: [] },
+        { t: 1000, c: undefined, s: [] },
+    ];
+    assert.deepEqual(crossedThresholds(readings, [50, 70]), []);
 });

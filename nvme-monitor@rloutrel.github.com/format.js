@@ -97,6 +97,24 @@ export function usedGaugeColor(percent) {
     return COLOR_GREEN;
 }
 
+/**
+ * Format a duration in milliseconds as a compact string: "1m 5s", "42s",
+ * "0s". Values under a second round up to 1s so a tiny non-zero duration is
+ * still visible.
+ *
+ * @param {number} ms
+ * @returns {string}
+ */
+export function formatDurationMs(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return '0s';
+    const totalS = Math.round(ms / 1000);
+    if (totalS <= 0) return ms > 0 ? '1s' : '0s';
+    const minutes = Math.floor(totalS / 60);
+    const seconds = totalS % 60;
+    if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+    return `${seconds}s`;
+}
+
 // Temperature tier thresholds (°C) for the line-graph color coding. These
 // mirror the heuristic tiers in extension.js (TEMP_WARM_C / TEMP_HOT_C); the
 // red tier is also taken when the drive signals over-temperature via its
@@ -121,5 +139,5 @@ export function tempTierColor(tempCelsius, criticalWarning = 0) {
     return COLOR_RED;
 }
 
-export { COLOR_TRACK };
+export { COLOR_TRACK, COLOR_RED, COLOR_ORANGE, COLOR_GREEN };
 

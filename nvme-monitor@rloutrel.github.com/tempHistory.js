@@ -187,3 +187,73 @@ export class TempHistory {
 }
 
 export const TEMP_HISTORY_WINDOW_MS = DEFAULT_WINDOW_MS;
+
+/**
+ * Compute the total time the composite temperature spent at or above each of
+ * the given thresholds over the window, using linear interpolation between
+ * consecutive usable readings to account for variable sampling rates.
+ *
+ * For each pair of consecutive readings (a, b) with finite composite temps,
+ * the segment between them is traversed; the fraction of the segment at or
+ * above a threshold is determined by linear interpolation of the crossing
+ * point, and that fraction of the segment duration is added to that
+ * threshold's total. Readings with null/undefined/non-finite composite are
+ * skipped (segments crossing them are not counted).
+ *
+ * @param {TempReading[]} readings - Readings for a device (oldest..newest).
+ * @param {number[]} thresholds - Threshold values in °C (any order).
+ * @returns {Object<number, number>} Map threshold -> ms spent at/above it.
+ */
+export function computeTimeAboveThresholds(readings, thresholds) {
+    const result = {};
+    for (const th of thresholds) result[th] = 0;
+
+    const list = Array.isArray(readings) ? readings : [];
+    for (let i = 1; i < list.length; i++) {
+        const a = list[i - 1];
+        const b = list[i];
+        if (a.c === null || a.c === undefined || !Number.isFinite(a.c)) continue;
+        if (b.c === null || b.c === undefined || !Number.isFinite(b.c)) continue;
+        const dt = b.t - a.t;
+        if (dt <= 0) continue;
+        const ta = a.c;
+        const tb = b.c;
+        for (const th of thresholds) {
+            const aAbove = ta >= th;
+            const bAbove = tb >= th;
+            if (aAbove && bAbove) {
+                result[th] += dt;
+            } else if (aAbove || bAbove) {
+                // Crossing: interpolate the crossing time fraction.
+                const crossFrac = (th - ta) / (tb - ta);
+                const aboveFrac = aAbove ? crossFrac : (1 - crossFrac);
+                result[th] += aboveFrac * dt;
+            }
+        }
+    }
+    return result;
+}
+
+/**
+ * Determine which thresholds were crossed (reached at least once) by the
+ * composite temperature over the window.
+ *
+ * @param {TempReading[]} readings - Readings for a device (oldest..newest).
+ * @param {number[]} thresholds - Threshold values in °C.
+ * @returns {number[]} Thresholds crossed at least once (original order).
+ */
+export function crossedThresholds(readings, thresholds) {
+    const list = Array.isArray(readings) ? readings : [];
+    const crossed = [];
+    for (const th of thresholds) {
+        let found = false;
+        for (const r of list) {
+            if (r.c !== null && r.c !== undefined && Number.isFinite(r.c) && r.c >= th) {
+                found = true;
+                break;
+            }
+        }
+        if (found) crossed.push(th);
+    }
+    return crossed;
+}
