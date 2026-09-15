@@ -3,12 +3,10 @@
 A GNOME Shell extension that surfaces NVMe drive health directly in the
 top-bar menu: SMART log data, temperature, endurance and critical warnings.
 
-![NVMe Monitor menu](screenshots/nvme-monitor-menu.png)
+![NVMe Monitor menu, with disabled nvme smart-log stack](screenshots/nvme-monitor-menu_disabled.png)
 
-> The image above is a **placeholder**. Replace
-> `screenshots/nvme-monitor-menu.png` with a real screenshot of the
-> extension's menu (same path, same filename) and the README will pick it up
-> automatically.
+![NVMe Monitor menu, with enabled nvme smart-log stack]](screenshots/nvme-monitor-menu.png)
+
 
 ## Features
 
@@ -17,7 +15,7 @@ top-bar menu: SMART log data, temperature, endurance and critical warnings.
 - **SMART health data** read from `nvme smart-log -o json`:
   - Composite temperature and per-sensor readings, with a thermometer icon
     that reflects the temperature tier.
-  - Available Spare, Percentage Used, Power Cycles, Power On Hours.
+  - Available Spare, Lifetime Used, Power Cycles, Power On Hours.
   - Data Units Read / Written, Unsafe Shutdowns, Host Reads / Host Writes.
   - Media Errors and Critical Warnings, highlighted when set.
 - **Vendor-aware parsing** for Samsung, Western Digital, Micron, Crucial,

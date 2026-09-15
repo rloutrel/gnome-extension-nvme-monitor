@@ -11,6 +11,21 @@
     icon-size: 16px;
 }
 
+.nvme-panel-warning {
+    background-color: #8b1e24;
+    border-radius: 9999px;
+    padding: 2px;
+}
+
+/* The warning class is applied to the full top-bar button so the whole
+ * extension block turns red instead of only the icon container. */
+.PanelMenuButton .nvme-panel-warning,
+.nvme-panel-warning {
+    background-color: #8b1e24;
+    border-radius: 9999px;
+    padding: 2px;
+}
+
 /* Device header — bold model name */
 .nvme-device-header {
     font-weight: bold;
@@ -54,13 +69,31 @@
     font-style: italic;
 }
 
-/* Custom hover tooltip — mimics the GNOME Shell tooltip look. */
+/* Short hover feedback for raw values. */
 .nvme-hover-tooltip {
     border-radius: 8px;
     padding: 6px 10px;
     background-color: rgba(0, 0, 0, 0.85);
     color: #ffffff;
     font-size: 0.9em;
+}
+
+/* Explicit help affordance for explanations that are too long for hover. */
+.nvme-help-button {
+    min-width: 18px;
+    min-height: 18px;
+    padding: 0;
+    border-radius: 9px;
+    background-color: rgba(128, 128, 128, 0.35);
+}
+
+.nvme-help-button:hover,
+.nvme-help-button:focus {
+    background-color: rgba(128, 128, 128, 0.6);
+}
+
+.nvme-clickable {
+    cursor: pointer;
 }
 
 /* Click-to-explain overlay (title + body), transient. */
@@ -70,7 +103,7 @@
     spacing: 6px;
     background-color: rgba(0, 0, 0, 0.9);
     color: #ffffff;
-    max-width: 320px;
+    width: 320px;
 }
 
 .nvme-explain-title {
@@ -94,17 +127,39 @@
     margin-right: 6px;
 }
 
-/* A single health-gauge segment: label + camembert diagram, placed on
- * the right half of the device meta line. */
+/* Health gauges placed directly beside the device name. */
+.nvme-gauge-header {
+    spacing: 4px;
+    margin-left: 8px;
+}
+
+/* Retained for compatibility with older dynamically created menu rows. */
 .nvme-gauge-segment {
     spacing: 6px;
 }
 
-/* Stack of health gauges (Available Spare over Percentage Used),
+/* Stack of health gauges (Available Spare over Lifetime Used),
  * one above the other, right-aligned on the right half of the meta line. */
 .nvme-gauge-stack {
     spacing: 2px;
 }
+
+.nvme-meta-columns {
+    spacing: 8px;
+}
+
+/* Compact horizontal filesystem-usage bar row shown under the SMART gauges. */
+.nvme-disk-row {
+    spacing: 6px;
+    min-width: 180px;
+}
+
+.nvme-disk-usage-bar {
+    margin-top: 2px;
+    margin-bottom: 2px;
+    border-radius: 2px;
+}
+
 /* Last-minute temperature line graph (St.DrawingArea / Cairo), drawn
  * below a device SMART section. The graph is drawn in code; this class
  * only adds horizontal padding so it aligns with the menu text. */

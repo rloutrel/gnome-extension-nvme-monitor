@@ -63,7 +63,7 @@ export function formatPowerOnHours(hours) {
 const SPARE_RED = 15;
 const SPARE_ORANGE = 50;
 
-// Thresholds for the Percentage Used gauge color code (percent).
+// Thresholds for the Lifetime Used gauge color code (percent).
 // The logic is inverted relative to Available Spare: high usage is bad.
 const USED_ORANGE = 50;
 const USED_RED = 85;
@@ -86,7 +86,7 @@ export function spareGaugeColor(percent) {
 }
 
 /**
- * Percentage Used gauge color: red above 85%, orange above 50%, else green
+ * Lifetime Used gauge color: red above 85%, orange above 50%, else green
  * (inverted logic).
  * @param {number} percent
  * @returns {number[]} [r, g, b]

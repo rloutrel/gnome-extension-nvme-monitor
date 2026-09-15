@@ -16,7 +16,7 @@ endurance) in the top-bar menu. Targets **GNOME Shell 50/51** (ESM imports
 
 ## Architecture
 
-```
+```text
 nvme-monitor@rloutrel.github.com/
   extension.js         # GNOME Shell entry point: Indicator, menu, polling,
                        #   icon loading, command execution, nvme-cli version
@@ -147,7 +147,7 @@ Two known nvme-cli software bugs (not hardware) affect this extension:
   2.0–2.2, fixed in 2.3 / libnvme 1.3.
 - **Bug B** (JSON format change): `nvme list -o json` switched to a nested
   layout in 2.11–2.12, reverted in 2.13, reintroduced in 3.0+.
-  Reference: https://github.com/linux-nvme/nvme-cli/issues/2749
+  Reference: [JSON output change for 'list' in 2.11+ breaks automation](https://github.com/linux-nvme/nvme-cli/issues/2749)
 
 The extension parses both layouts (`deviceList.js`) and warns affected users
 (`versionUtils.js` + notification linking to issue #2749).
@@ -181,11 +181,13 @@ auto-initializes the domain named in `metadata.json` (`gettext-domain`).
   - `fr.po`, `de.po` — per-language translations.
 - When strings are added/removed/changed, regenerate the POT template and
   update the `.po` files. With gettext installed:
+
   ```bash
   cd nvme-monitor@rloutrel.github.com
   xgettext --from-code=UTF-8 --output=po/nvme-monitor@rloutrel.github.com.pot \
       --files-from=po/POTFILES --keyword=_ --keyword=N_
   ```
+
   (No `xgettext` in the dev environment — edit the `.pot`/`.po` by hand
   instead.)
 - Compiled `.mo` files (in `locale/<lang>/LC_MESSAGES/`) are produced at
@@ -196,6 +198,17 @@ auto-initializes the domain named in `metadata.json` (`gettext-domain`).
 
 Pure modules are unit-tested with Node's built-in runner (no test framework,
 no dependencies):
+
+The host environment does not provide Node. Run all Node tests and syntax
+checks through the Docker fallback documented in
+`.github/skills/gnome-test-ollama-assessment/SKILL.md`; never invoke bare
+`node --test` or `node --check` on the host. Use:
+
+```bash
+VALIDATION_RUNTIME=docker \
+VALIDATION_DOCKER_IMAGE=node:22-bookworm \
+./.github/skills/gnome-test-ollama-assessment/scripts/validate-and-assess.sh
+```
 
 ```bash
 node --test \
@@ -227,6 +240,7 @@ Conventional commits, scoped:
 ## Polkit stack
 
 `setup-polkit.sh` (run as root via pkexec from the extension) installs:
+
 - `/usr/local/bin/nvme-smart-log-json` — wrapper restricted to
   `nvme smart-log -o json /dev/nvme*`
 - A `nvme-smart` system group; the invoking user is added to it
