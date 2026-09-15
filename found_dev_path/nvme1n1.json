@@ -1,0 +1,270 @@
+{
+  "devicePath": "/dev/nvme1n1",
+  "lsblkPhysicalVolumes": [],
+  "lvmInfo": {
+    "physicalVolumes": [],
+    "logicalVolumes": []
+  },
+  "filesystemEntries": [
+    {
+      "source": "/dev/nvme0n1p3",
+      "filesystem": "ext4",
+      "mount": "/",
+      "used": 58299556,
+      "avail": 122602148,
+      "total": 180901704,
+      "percent": 33,
+      "isLvm": false
+    },
+    {
+      "source": "devtmpfs",
+      "filesystem": "devtmpfs",
+      "mount": "/dev",
+      "used": 0,
+      "avail": 32791984,
+      "total": 32791984,
+      "percent": 0,
+      "isLvm": false
+    },
+    {
+      "source": "tmpfs",
+      "filesystem": "tmpfs",
+      "mount": "/dev/shm",
+      "used": 1172,
+      "avail": 32872596,
+      "total": 32873768,
+      "percent": 1,
+      "isLvm": false
+    },
+    {
+      "source": "efivarfs",
+      "filesystem": "efivarfs",
+      "mount": "/sys/firmware/efi/efivars",
+      "used": 54,
+      "avail": 70,
+      "total": 124,
+      "percent": 44,
+      "isLvm": false
+    },
+    {
+      "source": "tmpfs",
+      "filesystem": "tmpfs",
+      "mount": "/run",
+      "used": 2608,
+      "avail": 13146900,
+      "total": 13149508,
+      "percent": 1,
+      "isLvm": false
+    },
+    {
+      "source": "none",
+      "filesystem": "tmpfs",
+      "mount": "/run/credentials/systemd-journald.service",
+      "used": 0,
+      "avail": 1024,
+      "total": 1024,
+      "percent": 0,
+      "isLvm": false
+    },
+    {
+      "source": "none",
+      "filesystem": "tmpfs",
+      "mount": "/run/credentials/systemd-resolved.service",
+      "used": 0,
+      "avail": 1024,
+      "total": 1024,
+      "percent": 0,
+      "isLvm": false
+    },
+    {
+      "source": "/dev/nvme0n1p5",
+      "filesystem": "ext4",
+      "mount": "/boot",
+      "used": 617076,
+      "avail": 259488,
+      "total": 876564,
+      "percent": 71,
+      "isLvm": false
+    },
+    {
+      "source": "tmpfs",
+      "filesystem": "tmpfs",
+      "mount": "/tmp",
+      "used": 11324,
+      "avail": 32862444,
+      "total": 32873768,
+      "percent": 1,
+      "isLvm": false
+    },
+    {
+      "source": "/dev/nvme0n1p4",
+      "filesystem": "ext4",
+      "mount": "/ubuntu",
+      "used": 114655280,
+      "avail": 20714116,
+      "total": 135369396,
+      "percent": 85,
+      "isLvm": false
+    },
+    {
+      "source": "/dev/mapper/VG_UBUNTUS-lv_ai--playground",
+      "filesystem": "ext4",
+      "mount": "/ai-playground",
+      "used": 105771240,
+      "avail": 41608756,
+      "total": 147379996,
+      "percent": 72,
+      "isLvm": true
+    },
+    {
+      "source": "/dev/mapper/VG_UBUNTUS-opt",
+      "filesystem": "ext4",
+      "mount": "/opt",
+      "used": 71765792,
+      "avail": 123046088,
+      "total": 194811880,
+      "percent": 37,
+      "isLvm": true
+    },
+    {
+      "source": "/dev/mapper/VG_UBUNTUS-lv_home",
+      "filesystem": "ext4",
+      "mount": "/home",
+      "used": 65265356,
+      "avail": 159582540,
+      "total": 224847896,
+      "percent": 30,
+      "isLvm": true
+    },
+    {
+      "source": "/dev/nvme1n1p1",
+      "filesystem": "ext4",
+      "mount": "/var/lib/libvirt/images",
+      "used": 143520808,
+      "avail": 198340216,
+      "total": 341861024,
+      "percent": 42,
+      "isLvm": false
+    },
+    {
+      "source": "/dev/nvme1n1p2",
+      "filesystem": "ext4",
+      "mount": "/sharing",
+      "used": 19988588,
+      "avail": 70648736,
+      "total": 90637324,
+      "percent": 23,
+      "isLvm": false
+    },
+    {
+      "source": "/dev/nvme0n1p1",
+      "filesystem": "vfat",
+      "mount": "/boot/efi",
+      "used": 25752,
+      "avail": 509760,
+      "total": 535512,
+      "percent": 5,
+      "isLvm": false
+    },
+    {
+      "source": "/dev/mapper/VG_UBUNTUS-lv_workspaces",
+      "filesystem": "ext4",
+      "mount": "/home/romain/mnt_workspaces",
+      "used": 11571912,
+      "avail": 17626332,
+      "total": 29198244,
+      "percent": 40,
+      "isLvm": true
+    },
+    {
+      "source": "/dev/mapper/VG_UBUNTUS-lv_nextcloud",
+      "filesystem": "ext4",
+      "mount": "/home/romain/mnt_nextcloud",
+      "used": 204880236,
+      "avail": 185857084,
+      "total": 390737320,
+      "percent": 53,
+      "isLvm": true
+    },
+    {
+      "source": "/dev/mapper/VG_UBUNTUS-lv_steam",
+      "filesystem": "ext4",
+      "mount": "/home/romain/mnt_steam",
+      "used": 179462440,
+      "avail": 73151216,
+      "total": 252613656,
+      "percent": 72,
+      "isLvm": true
+    },
+    {
+      "source": "tmpfs",
+      "filesystem": "tmpfs",
+      "mount": "/run/user/1000",
+      "used": 9048,
+      "avail": 6565704,
+      "total": 6574752,
+      "percent": 1,
+      "isLvm": false
+    },
+    {
+      "source": "tmpfs",
+      "filesystem": "tmpfs",
+      "mount": "/run/user/0",
+      "used": 0,
+      "avail": 6574752,
+      "total": 6574752,
+      "percent": 0,
+      "isLvm": false
+    }
+  ],
+  "matchedEntries": [
+    {
+      "source": "/dev/nvme1n1p1",
+      "filesystem": "ext4",
+      "mount": "/var/lib/libvirt/images",
+      "used": 143520808,
+      "avail": 198340216,
+      "total": 341861024,
+      "percent": 42,
+      "color": [
+        0.75,
+        0.11,
+        0.14
+      ],
+      "isLvm": false
+    },
+    {
+      "source": "/dev/nvme1n1p2",
+      "filesystem": "ext4",
+      "mount": "/sharing",
+      "used": 19988588,
+      "avail": 70648736,
+      "total": 90637324,
+      "percent": 23,
+      "color": [
+        0.75,
+        0.11,
+        0.14
+      ],
+      "isLvm": false
+    }
+  ],
+  "testBar": [
+    {
+      "source": "/dev/nvme1n1p1",
+      "isLvm": false,
+      "total": 341861024,
+      "used": 143520808,
+      "avail": 198340216,
+      "order": "red-used-then-green-free"
+    },
+    {
+      "source": "/dev/nvme1n1p2",
+      "isLvm": false,
+      "total": 90637324,
+      "used": 19988588,
+      "avail": 70648736,
+      "order": "red-used-then-green-free"
+    }
+  ]
+}

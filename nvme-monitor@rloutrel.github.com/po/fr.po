@@ -42,23 +42,23 @@ msgstr "Spare disponible"
 
 #: extension.js:419
 msgid ""
-"Reserved capacity the drive can swap in to replace failing blocks. Red below "
-"15%, orange below 50%, green otherwise."
+"Reserved capacity the drive can swap in to replace failing blocks. Critical "
+"below 15%, warning below 50%, OK otherwise."
 msgstr ""
 "Capacité de réserve que le disque peut mobiliser pour remplacer les blocs "
-"défaillants. Rouge sous 15 %, orange sous 50 %, vert sinon."
+"défaillants. Critique sous 15 %, avertissement sous 50 %, OK sinon."
 
 #: extension.js:426 extension.js:429
-msgid "Percentage Used"
-msgstr "Pourcentage utilisé"
+msgid "Lifetime Used"
+msgstr "Durée de vie utilisée"
 
 #: extension.js:430
 msgid ""
-"Estimated portion of the drive endurance consumed. Green below 50%, orange "
-"up to 85%, red above (inverted logic)."
+"Estimated portion of the drive endurance consumed. OK below 50%, warning up "
+"to 85%, critical above."
 msgstr ""
-"Part estimée de l'endurance du disque consommée. Vert sous 50 %, orange "
-"jusqu'à 85 %, rouge au-delà (logique inversée)."
+"Part estimée de l'endurance du disque consommée. OK sous 50 %, avertissement "
+"jusqu'à 85 %, critique au-delà."
 
 #: extension.js:443
 msgid "  SMART: parse error"
@@ -147,3 +147,42 @@ msgstr "Pile polkit NVMe désinstallée."
 #: extension.js:1079
 msgid "Uninstall failed (exit code "
 msgstr "Échec de la désinstallation (code de sortie "
+
+msgid "Device"
+msgstr "Périphérique"
+
+msgid "Mount"
+msgstr "Point de montage"
+
+msgid "Type"
+msgstr "Type"
+
+msgid "Unknown"
+msgstr "Inconnu"
+
+msgid "Usage"
+msgstr "Utilisation"
+
+msgid "used"
+msgstr "utilisé"
+
+msgid "available"
+msgstr "disponible"
+
+msgid "total"
+msgstr "total"
+
+msgid "Disk usage"
+msgstr "Utilisation du disque"
+
+msgid "Logical volumes"
+msgstr "Volumes logiques"
+
+msgid "LVM physical volume"
+msgstr "Volume physique LVM"
+
+msgid "Volume group"
+msgstr "Groupe de volumes"
+
+msgid "Not assigned"
+msgstr "Non attribué"

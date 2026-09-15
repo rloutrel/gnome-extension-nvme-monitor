@@ -63,7 +63,7 @@ export function formatPowerOnHours(hours) {
 const SPARE_RED = 15;
 const SPARE_ORANGE = 50;
 
-// Thresholds for the Percentage Used gauge color code (percent).
+// Thresholds for the Lifetime Used gauge color code (percent).
 // The logic is inverted relative to Available Spare: high usage is bad.
 const USED_ORANGE = 50;
 const USED_RED = 85;
@@ -86,7 +86,7 @@ export function spareGaugeColor(percent) {
 }
 
 /**
- * Percentage Used gauge color: red above 85%, orange above 50%, else green
+ * Lifetime Used gauge color: red above 85%, orange above 50%, else green
  * (inverted logic).
  * @param {number} percent
  * @returns {number[]} [r, g, b]
@@ -97,5 +97,47 @@ export function usedGaugeColor(percent) {
     return COLOR_GREEN;
 }
 
-export { COLOR_TRACK };
+/**
+ * Format a duration in milliseconds as a compact string: "1m 5s", "42s",
+ * "0s". Values under a second round up to 1s so a tiny non-zero duration is
+ * still visible.
+ *
+ * @param {number} ms
+ * @returns {string}
+ */
+export function formatDurationMs(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return '0s';
+    const totalS = Math.round(ms / 1000);
+    if (totalS <= 0) return ms > 0 ? '1s' : '0s';
+    const minutes = Math.floor(totalS / 60);
+    const seconds = totalS % 60;
+    if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+    return `${seconds}s`;
+}
+
+// Temperature tier thresholds (°C) for the line-graph color coding. These
+// mirror the heuristic tiers in extension.js (TEMP_WARM_C / TEMP_HOT_C); the
+// red tier is also taken when the drive signals over-temperature via its
+// critical_warning bit 1.
+const TEMP_WARM_C = 50;
+const TEMP_HOT_C = 70;
+
+/**
+ * Color for a temperature reading, mirroring the menu thermometer tiers.
+ * Pass the raw critical_warning byte so the manufacturer-true over-temperature
+ * signal drives the red tier rather than a guessed °C value.
+ *
+ * @param {number|null|undefined} tempCelsius
+ * @param {number} [criticalWarning] - Raw NVMe SMART critical_warning byte.
+ * @returns {number[]} [r, g, b]
+ */
+export function tempTierColor(tempCelsius, criticalWarning = 0) {
+    if (tempCelsius === null || tempCelsius === undefined) return COLOR_TRACK;
+    if (criticalWarning & 0x02) return COLOR_RED;
+    if (tempCelsius < TEMP_WARM_C) return COLOR_GREEN;
+    if (tempCelsius < TEMP_HOT_C) return COLOR_ORANGE;
+    return COLOR_RED;
+}
+
+export { COLOR_TRACK, COLOR_RED, COLOR_ORANGE, COLOR_GREEN };
 

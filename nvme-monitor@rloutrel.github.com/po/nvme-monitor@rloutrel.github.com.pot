@@ -46,18 +46,18 @@ msgstr ""
 
 #: extension.js:419
 msgid ""
-"Reserved capacity the drive can swap in to replace failing blocks. Red below "
-"15%, orange below 50%, green otherwise."
+"Reserved capacity the drive can swap in to replace failing blocks. Critical "
+"below 15%, warning below 50%, OK otherwise."
 msgstr ""
 
 #: extension.js:426 extension.js:429
-msgid "Percentage Used"
+msgid "Lifetime Used"
 msgstr ""
 
 #: extension.js:430
 msgid ""
-"Estimated portion of the drive endurance consumed. Green below 50%, orange "
-"up to 85%, red above (inverted logic)."
+"Estimated portion of the drive endurance consumed. OK below 50%, warning up "
+"to 85%, critical above."
 msgstr ""
 
 #: extension.js:443
@@ -146,4 +146,43 @@ msgstr ""
 
 #: extension.js:1079
 msgid "Uninstall failed (exit code "
+msgstr ""
+
+msgid "Device"
+msgstr ""
+
+msgid "Mount"
+msgstr ""
+
+msgid "Type"
+msgstr ""
+
+msgid "Unknown"
+msgstr ""
+
+msgid "Usage"
+msgstr ""
+
+msgid "used"
+msgstr ""
+
+msgid "available"
+msgstr ""
+
+msgid "total"
+msgstr ""
+
+msgid "Disk usage"
+msgstr ""
+
+msgid "Logical volumes"
+msgstr ""
+
+msgid "LVM physical volume"
+msgstr ""
+
+msgid "Volume group"
+msgstr ""
+
+msgid "Not assigned"
 msgstr ""
