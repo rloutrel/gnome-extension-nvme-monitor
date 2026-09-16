@@ -1,0 +1,340 @@
+/**
+ * Unit tests for the rolling per-device temperature history.
+ *
+ * Run with: node --test nvme-monitor@rloutrel.github.com/test/tempHistory.test.js
+ *
+ * Uses Node's built-in test runner (no dependencies) since tempHistory.js is a
+ * pure module (no GJS imports) and can be tested outside GNOME Shell.
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { TempHistory, TEMP_HISTORY_WINDOW_MS, computeTimeAboveThresholds, crossedThresholds } from '../tempHistory.js';
+
+// ---------------------------------------------------------------------------
+// add / get / latest
+// ---------------------------------------------------------------------------
+
+test('add stores readings per device and get returns a copy', () => {
+    const h = new TempHistory();
+    h.add('/dev/nvme0n1', { t: 1000, c: 42, s: [41, 45] });
+    h.add('/dev/nvme0n1', { t: 2000, c: 43, s: [42, 46] });
+    assert.deepEqual(h.get('/dev/nvme0n1'), [
+        { t: 1000, c: 42, s: [41, 45] },
+        { t: 2000, c: 43, s: [42, 46] },
+    ]);
+});
+
+test('get for an unknown device returns an empty array', () => {
+    const h = new TempHistory();
+    assert.deepEqual(h.get('/dev/nvme9n1'), []);
+});
+
+test('get returns a copy: mutating it does not affect the store', () => {
+    const h = new TempHistory();
+    h.add('/dev/nvme0n1', { t: 1000, c: 42, s: [] });
+    const copy = h.get('/dev/nvme0n1');
+    copy.push({ t: 9999, c: 99, s: [] });
+    assert.equal(h.get('/dev/nvme0n1').length, 1);
+});
+
+test('latest returns the most recent reading, or null when none', () => {
+    const h = new TempHistory();
+    assert.equal(h.latest('/dev/nvme0n1'), null);
+    h.add('/dev/nvme0n1', { t: 1000, c: 42, s: [] });
+    h.add('/dev/nvme0n1', { t: 2000, c: 43, s: [] });
+    assert.deepEqual(h.latest('/dev/nvme0n1'), { t: 2000, c: 43, s: [] });
+});
+
+test('add ignores empty devicePath or reading', () => {
+    const h = new TempHistory();
+    h.add('', { t: 1000, c: 42, s: [] });
+    h.add('/dev/nvme0n1', null);
+    assert.deepEqual(h.devices(), []);
+});
+
+test('multiple devices are tracked independently', () => {
+    const h = new TempHistory();
+    h.add('/dev/nvme0n1', { t: 1000, c: 40, s: [] });
+    h.add('/dev/nvme1n1', { t: 1000, c: 50, s: [] });
+    h.add('/dev/nvme0n1', { t: 2000, c: 41, s: [] });
+    assert.deepEqual(h.devices().sort(), ['/dev/nvme0n1', '/dev/nvme1n1']);
+    assert.equal(h.get('/dev/nvme0n1').length, 2);
+    assert.equal(h.get('/dev/nvme1n1').length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// range (min/max over the window)
+// ---------------------------------------------------------------------------
+
+test('range returns min and max composite over the window', () => {
+    const h = new TempHistory();
+    h.add('/dev/nvme0n1', { t: 1000, c: 42, s: [] });
+    h.add('/dev/nvme0n1', { t: 2000, c: 38, s: [] });
+    h.add('/dev/nvme0n1', { t: 3000, c: 55, s: [] });
+    assert.deepEqual(h.range('/dev/nvme0n1'), { min: 38, max: 55 });
+});
+
+test('range is null for an unknown device', () => {
+    const h = new TempHistory();
+    assert.equal(h.range('/dev/nvme9n1'), null);
+});
+
+test('range is null when all readings have null/undefined composite', () => {
+    const h = new TempHistory();
+    h.add('/dev/nvme0n1', { t: 1000, c: null, s: [] });
+    h.add('/dev/nvme0n1', { t: 2000, c: undefined, s: [] });
+    assert.equal(h.range('/dev/nvme0n1'), null);
+});
+
+test('range ignores null/undefined readings when computing min/max', () => {
+    const h = new TempHistory();
+    h.add('/dev/nvme0n1', { t: 1000, c: null, s: [] });
+    h.add('/dev/nvme0n1', { t: 2000, c: 40, s: [] });
+    h.add('/dev/nvme0n1', { t: 3000, c: undefined, s: [] });
+    h.add('/dev/nvme0n1', { t: 4000, c: 60, s: [] });
+    assert.deepEqual(h.range('/dev/nvme0n1'), { min: 40, max: 60 });
+});
+
+test('range reflects only the readings kept within the window', () => {
+    const h = new TempHistory({ windowMs: 1000 });
+    h.add('/dev/nvme0n1', { t: 0, c: 10, s: [] });   // pruned by the next add
+    h.add('/dev/nvme0n1', { t: 500, c: 40, s: [] });
+    h.add('/dev/nvme0n1', { t: 1500, c: 50, s: [] });
+    assert.deepEqual(h.range('/dev/nvme0n1'), { min: 40, max: 50 });
+});
+
+// ---------------------------------------------------------------------------
+// rolling window pruning
+// ---------------------------------------------------------------------------
+
+test('add prunes readings older than the window (relative to reading.t)', () => {
+    const h = new TempHistory({ windowMs: 1000 });
+    h.add('/dev/nvme0n1', { t: 0, c: 40, s: [] });
+    h.add('/dev/nvme0n1', { t: 500, c: 41, s: [] });
+    h.add('/dev/nvme0n1', { t: 1500, c: 42, s: [] });
+    // t=0 is older than 1500-1000=500, so it is pruned.
+    assert.deepEqual(h.get('/dev/nvme0n1'), [
+        { t: 500, c: 41, s: [] },
+        { t: 1500, c: 42, s: [] },
+    ]);
+});
+
+test('add prunes relative to an explicit now reference', () => {
+    const h = new TempHistory({ windowMs: 1000 });
+    h.add('/dev/nvme0n1', { t: 0, c: 40, s: [] }, 2000);
+    // t=0 is older than 2000-1000=1000, pruned immediately.
+    assert.deepEqual(h.get('/dev/nvme0n1'), []);
+});
+
+test('pruneStale drops old readings across all devices and empties devices', () => {
+    const h = new TempHistory({ windowMs: 1000 });
+    h.add('/dev/nvme0n1', { t: 0, c: 40, s: [] });
+    h.add('/dev/nvme0n1', { t: 500, c: 41, s: [] });
+    h.add('/dev/nvme1n1', { t: 0, c: 50, s: [] });
+    h.pruneStale(1500);
+    assert.deepEqual(h.get('/dev/nvme0n1'), [{ t: 500, c: 41, s: [] }]);
+    // nvme1n1's only reading is stale -> device dropped entirely.
+    assert.deepEqual(h.get('/dev/nvme1n1'), []);
+    assert.deepEqual(h.devices(), ['/dev/nvme0n1']);
+});
+
+test('default window is 10 minutes (600s)', () => {
+    assert.equal(TEMP_HISTORY_WINDOW_MS, 600_000);
+    const h = new TempHistory();
+    h.add('/dev/nvme0n1', { t: 0, c: 40, s: [] });
+    h.add('/dev/nvme0n1', { t: 599_999, c: 41, s: [] });
+    assert.equal(h.get('/dev/nvme0n1').length, 2);
+    h.add('/dev/nvme0n1', { t: 600_001, c: 42, s: [] });
+    assert.equal(h.get('/dev/nvme0n1').length, 2);
+});
+
+test('invalid windowMs falls back to the 10-minute default', () => {
+    const h = new TempHistory({ windowMs: -5 });
+    h.add('/dev/nvme0n1', { t: 0, c: 40, s: [] });
+    h.add('/dev/nvme0n1', { t: 600_001, c: 42, s: [] });
+    // Effective window is 600s (not -5), so t=0 (cutoff = 600001-600000 = 1)
+    // is pruned while t=600001 survives — proving the fallback to the default.
+    assert.equal(h.get('/dev/nvme0n1').length, 1);
+    assert.deepEqual(h.get('/dev/nvme0n1'), [{ t: 600_001, c: 42, s: [] }]);
+});
+
+// ---------------------------------------------------------------------------
+// remove / clear
+// ---------------------------------------------------------------------------
+
+test('remove drops a single device, clear drops all', () => {
+    const h = new TempHistory();
+    h.add('/dev/nvme0n1', { t: 1000, c: 40, s: [] });
+    h.add('/dev/nvme1n1', { t: 1000, c: 50, s: [] });
+    h.remove('/dev/nvme0n1');
+    assert.deepEqual(h.devices(), ['/dev/nvme1n1']);
+    h.clear();
+    assert.deepEqual(h.devices(), []);
+});
+
+// ---------------------------------------------------------------------------
+// serialize / deserialize round-trip
+// ---------------------------------------------------------------------------
+
+test('serialize/deserialize round-trips readings and windowMs', () => {
+    const h = new TempHistory({ windowMs: 5000 });
+    h.add('/dev/nvme0n1', { t: 1000, c: 42.5, s: [41, 45] });
+    h.add('/dev/nvme1n1', { t: 1000, c: 50, s: [] });
+    const str = h.serialize();
+    const h2 = TempHistory.deserialize(str);
+    assert.deepEqual(h2.get('/dev/nvme0n1'), [{ t: 1000, c: 42.5, s: [41, 45] }]);
+    assert.deepEqual(h2.get('/dev/nvme1n1'), [{ t: 1000, c: 50, s: [] }]);
+});
+
+test('deserialize prunes stale readings relative to now', () => {
+    const h = new TempHistory({ windowMs: 1000 });
+    h.add('/dev/nvme0n1', { t: 0, c: 40, s: [] });
+    h.add('/dev/nvme0n1', { t: 500, c: 41, s: [] });
+    const str = h.serialize();
+    const h2 = TempHistory.deserialize(str, 1500);
+    assert.deepEqual(h2.get('/dev/nvme0n1'), [{ t: 500, c: 41, s: [] }]);
+});
+
+test('deserialize tolerates missing/invalid windowMs (falls back to 60s)', () => {
+    const h = TempHistory.deserialize('{"devices":{}}');
+    assert.equal(h.get('/dev/nvme0n1').length, 0);
+});
+
+test('deserialize tolerates a non-array device list entry', () => {
+    const str = JSON.stringify({ windowMs: 1000, devices: { '/dev/nvme0n1': 'not-an-array' } });
+    const h = TempHistory.deserialize(str);
+    assert.deepEqual(h.get('/dev/nvme0n1'), []);
+});
+
+// ---------------------------------------------------------------------------
+// computeTimeAboveThresholds (interpolated)
+// ---------------------------------------------------------------------------
+
+test('computeTimeAboveThresholds: fully above a threshold for the whole span', () => {
+    const readings = [
+        { t: 0, c: 60, s: [] },
+        { t: 10000, c: 65, s: [] },
+    ];
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 10000);
+});
+
+test('computeTimeAboveThresholds: fully below a threshold', () => {
+    const readings = [
+        { t: 0, c: 30, s: [] },
+        { t: 10000, c: 35, s: [] },
+    ];
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 0);
+});
+
+test('computeTimeAboveThresholds: crossing upward interpolated at midpoint', () => {
+    // 30->70 over 10s, crossing 50 at the midpoint (5s above).
+    const readings = [
+        { t: 0, c: 30, s: [] },
+        { t: 10000, c: 70, s: [] },
+    ];
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 5000);
+});
+
+test('computeTimeAboveThresholds: crossing downward interpolated at midpoint', () => {
+    // 70->30 over 10s, crossing 50 at the midpoint (5s above).
+    const readings = [
+        { t: 0, c: 70, s: [] },
+        { t: 10000, c: 30, s: [] },
+    ];
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 5000);
+});
+
+test('computeTimeAboveThresholds: multiple thresholds sum correctly', () => {
+    // 40->80 over 10s. Crosses 50 at 25% (2.5s above 50), 70 at 75% (7.5s above 70).
+    const readings = [
+        { t: 0, c: 40, s: [] },
+        { t: 10000, c: 80, s: [] },
+    ];
+    const result = computeTimeAboveThresholds(readings, [50, 70]);
+    assert.equal(result[50], 7500);
+    assert.equal(result[70], 2500);
+});
+
+test('computeTimeAboveThresholds: null composite breaks adjacent segments', () => {
+    const readings = [
+        { t: 0, c: 60, s: [] },
+        { t: 5000, c: null, s: [] },
+        { t: 10000, c: 65, s: [] },
+    ];
+    // A null composite cannot be used as a segment endpoint, so both the
+    // 0->5000 and 5000->10000 segments are skipped (no usable span).
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 0);
+});
+
+test('computeTimeAboveThresholds: usable segments around a null are counted', () => {
+    const readings = [
+        { t: 0, c: 60, s: [] },
+        { t: 5000, c: 65, s: [] },
+        { t: 8000, c: null, s: [] },
+        { t: 12000, c: 70, s: [] },
+        { t: 16000, c: 75, s: [] },
+    ];
+    // Segments 0->5000 (5s) and 12000->16000 (4s) are usable = 9s above 50;
+    // the segments touching the null reading are skipped.
+    const result = computeTimeAboveThresholds(readings, [50]);
+    assert.equal(result[50], 9000);
+});
+
+test('computeTimeAboveThresholds: empty or single reading yields zeros', () => {
+    assert.deepEqual(computeTimeAboveThresholds([], [50]), { 50: 0 });
+    assert.deepEqual(computeTimeAboveThresholds([{ t: 0, c: 60, s: [] }], [50]), { 50: 0 });
+});
+
+test('computeTimeAboveThresholds: zero/negative dt segments are skipped', () => {
+    const readings = [
+        { t: 0, c: 60, s: [] },
+        { t: 0, c: 65, s: [] },  // same timestamp -> dt=0, skipped
+    ];
+    assert.equal(computeTimeAboveThresholds(readings, [50])[50], 0);
+});
+
+// ---------------------------------------------------------------------------
+// crossedThresholds
+// ---------------------------------------------------------------------------
+
+test('crossedThresholds: returns thresholds reached at least once', () => {
+    const readings = [
+        { t: 0, c: 40, s: [] },
+        { t: 1000, c: 55, s: [] },
+        { t: 2000, c: 48, s: [] },
+    ];
+    assert.deepEqual(crossedThresholds(readings, [50, 70]), [50]);
+});
+
+test('crossedThresholds: multiple thresholds crossed', () => {
+    const readings = [
+        { t: 0, c: 40, s: [] },
+        { t: 1000, c: 75, s: [] },
+    ];
+    assert.deepEqual(crossedThresholds(readings, [50, 70]), [50, 70]);
+});
+
+test('crossedThresholds: none crossed when all below', () => {
+    const readings = [
+        { t: 0, c: 30, s: [] },
+        { t: 1000, c: 35, s: [] },
+    ];
+    assert.deepEqual(crossedThresholds(readings, [50, 70]), []);
+});
+
+test('crossedThresholds: empty readings yields none', () => {
+    assert.deepEqual(crossedThresholds([], [50, 70]), []);
+});
+
+test('crossedThresholds: ignores null/undefined composite', () => {
+    const readings = [
+        { t: 0, c: null, s: [] },
+        { t: 1000, c: undefined, s: [] },
+    ];
+    assert.deepEqual(crossedThresholds(readings, [50, 70]), []);
+});

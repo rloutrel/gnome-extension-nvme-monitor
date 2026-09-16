@@ -16,7 +16,7 @@ endurance) in the top-bar menu. Targets **GNOME Shell 50/51** (ESM imports
 
 ## Architecture
 
-```
+```text
 nvme-monitor@rloutrel.github.com/
   extension.js         # GNOME Shell entry point: Indicator, menu, polling,
                        #   icon loading, command execution, nvme-cli version
@@ -32,6 +32,10 @@ nvme-monitor@rloutrel.github.com/
                        #   bytes overflow). assessNvmeCliVersion().
   deviceList.js         # PURE: normalize flat + nested `nvme list -o json`
                        #   layouts into a uniform device entry list.
+  tempHistory.js       # PURE: rolling per-device temperature history (last
+                       #   10 minutes) with serialize()/deserialize() for /tmp
+                       #   persistence and range() (min/max). TempHistory ring
+                       #   buffer.
   stylesheet.css        # Theme-aware styles (no hardcoded colors).
   metadata.json         # Shell version, UUID, version.
   setup-polkit.sh       # Installs the polkit + wrapper stack (run as root).
@@ -41,9 +45,9 @@ nvme-monitor@rloutrel.github.com/
 
 ### Pure vs GJS modules
 
-A hard rule: **`smartParser.js`, `tempFormat.js`, `versionUtils.js`, and
-`deviceList.js` are pure modules with zero GJS/GObject imports.** They run
-under plain Node and are unit-tested there. Do **not** add `gi://` or
+A hard rule: **`smartParser.js`, `tempFormat.js`, `versionUtils.js`,
+`deviceList.js`, and `tempHistory.js` are pure modules with zero GJS/GObject
+imports.** They run under plain Node and are unit-tested there. Do **not** add `gi://` or
 `resource:///` imports to these files. Anything that touches `Gio`, `GLib`,
 `St`, `Clutter`, `Main`, or GObject belongs in `extension.js` (or a future
 GJS-only module), never in a pure module.
@@ -51,7 +55,9 @@ GJS-only module), never in a pure module.
 ### Data flow
 
 1. `enable()` builds the `Indicator`, loads the panel icon, runs the nvme-cli
-   version check, and starts polling if the polkit stack is installed.
+   version check, restores the persisted rolling temperature history from
+   `/tmp/nvme-monitor-temp-history.json`, and starts polling if the polkit
+   stack is installed.
 2. On menu open (or every 5s while polling), `_refreshDevices()` rebuilds the
    device section.
 3. `_fetchAndCacheDevices()` runs `nvme list -o json` once and caches the result.
@@ -64,6 +70,23 @@ GJS-only module), never in a pure module.
 5. SMART data is fetched via the polkit wrapper
    (`/usr/local/bin/nvme-smart-log-json`), which restricts nvme-cli to
    `smart-log -o json` on `/dev/nvme*` devices only.
+6. On every successful SMART read, the composite temperature is appended to
+   the per-device rolling history (`TempHistory`, last 10 minutes) and
+   persisted to `/tmp/nvme-monitor-temp-history.json` via
+   `GLib.file_set_contents` (atomic). The history is rendered as a 10-minute
+   line graph (`St.DrawingArea` / Cairo) below each device's SMART section,
+   colored by the temperature tier, with the min/max temperature over the
+   window annotated on the left axis (`TempHistory.range()`). The max marker
+   is tinted by its own temperature tier; intermediate thresholds (warm/hot)
+   crossed at least once (`crossedThresholds()`) are drawn as tier-colored
+   guides, and a right-side time counter shows how long the temperature stayed
+   at/above each crossed threshold (`computeTimeAboveThresholds()`, linearly
+   interpolated, and `formatDurationMs()`).
+7. Devices in the red (critical/hot) tier — `critical_warning` bit 1 set, or
+   composite >= `TEMP_HOT_C` — get a per-device 500ms fast timer
+   (`_syncCriticalTimers`) that re-fetches only that device's SMART, records
+   the temperature, persists, and repaints its graph in place, without
+   rebuilding the menu. The normal 5s timer keeps driving the full rebuild.
 
 ## Conventions
 
@@ -124,7 +147,7 @@ Two known nvme-cli software bugs (not hardware) affect this extension:
   2.0–2.2, fixed in 2.3 / libnvme 1.3.
 - **Bug B** (JSON format change): `nvme list -o json` switched to a nested
   layout in 2.11–2.12, reverted in 2.13, reintroduced in 3.0+.
-  Reference: https://github.com/linux-nvme/nvme-cli/issues/2749
+  Reference: [JSON output change for 'list' in 2.11+ breaks automation](https://github.com/linux-nvme/nvme-cli/issues/2749)
 
 The extension parses both layouts (`deviceList.js`) and warns affected users
 (`versionUtils.js` + notification linking to issue #2749).
@@ -158,11 +181,13 @@ auto-initializes the domain named in `metadata.json` (`gettext-domain`).
   - `fr.po`, `de.po` — per-language translations.
 - When strings are added/removed/changed, regenerate the POT template and
   update the `.po` files. With gettext installed:
+
   ```bash
   cd nvme-monitor@rloutrel.github.com
   xgettext --from-code=UTF-8 --output=po/nvme-monitor@rloutrel.github.com.pot \
       --files-from=po/POTFILES --keyword=_ --keyword=N_
   ```
+
   (No `xgettext` in the dev environment — edit the `.pot`/`.po` by hand
   instead.)
 - Compiled `.mo` files (in `locale/<lang>/LC_MESSAGES/`) are produced at
@@ -174,12 +199,25 @@ auto-initializes the domain named in `metadata.json` (`gettext-domain`).
 Pure modules are unit-tested with Node's built-in runner (no test framework,
 no dependencies):
 
+The host environment does not provide Node. Run all Node tests and syntax
+checks through the Docker fallback documented in
+`.github/skills/gnome-test-ollama-assessment/SKILL.md`; never invoke bare
+`node --test` or `node --check` on the host. Use:
+
+```bash
+VALIDATION_RUNTIME=docker \
+VALIDATION_DOCKER_IMAGE=node:22-bookworm \
+./.github/skills/gnome-test-ollama-assessment/scripts/validate-and-assess.sh
+```
+
 ```bash
 node --test \
   "nvme-monitor@rloutrel.github.com/test/tempFormat.test.js" \
   "nvme-monitor@rloutrel.github.com/test/smartParser.test.js" \
   "nvme-monitor@rloutrel.github.com/test/versionUtils.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/deviceList.test.js"
+  "nvme-monitor@rloutrel.github.com/test/deviceList.test.js" \
+  "nvme-monitor@rloutrel.github.com/test/format.test.js" \
+  "nvme-monitor@rloutrel.github.com/test/tempHistory.test.js"
 ```
 
 - Use `node:test` + `node:assert/strict`.
@@ -202,6 +240,7 @@ Conventional commits, scoped:
 ## Polkit stack
 
 `setup-polkit.sh` (run as root via pkexec from the extension) installs:
+
 - `/usr/local/bin/nvme-smart-log-json` — wrapper restricted to
   `nvme smart-log -o json /dev/nvme*`
 - A `nvme-smart` system group; the invoking user is added to it
