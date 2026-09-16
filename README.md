@@ -3,12 +3,10 @@
 A GNOME Shell extension that surfaces NVMe drive health directly in the
 top-bar menu: SMART log data, temperature, endurance and critical warnings.
 
-![NVMe Monitor menu](screenshots/nvme-monitor-menu.png)
+![NVMe Monitor menu, with disabled nvme smart-log stack](screenshots/nvme-monitor-menu_disabled.png)
 
-> The image above is a **placeholder**. Replace
-> `screenshots/nvme-monitor-menu.png` with a real screenshot of the
-> extension's menu (same path, same filename) and the README will pick it up
-> automatically.
+![NVMe Monitor menu, with enabled nvme smart-log stack]](screenshots/nvme-monitor-menu.png)
+
 
 ## Features
 
@@ -17,7 +15,7 @@ top-bar menu: SMART log data, temperature, endurance and critical warnings.
 - **SMART health data** read from `nvme smart-log -o json`:
   - Composite temperature and per-sensor readings, with a thermometer icon
     that reflects the temperature tier.
-  - Available Spare, Percentage Used, Power Cycles, Power On Hours.
+  - Available Spare, Lifetime Used, Power Cycles, Power On Hours.
   - Data Units Read / Written, Unsafe Shutdowns, Host Reads / Host Writes.
   - Media Errors and Critical Warnings, highlighted when set.
 - **Vendor-aware parsing** for Samsung, Western Digital, Micron, Crucial,
@@ -31,6 +29,22 @@ top-bar menu: SMART log data, temperature, endurance and critical warnings.
   menu adapts to dark/light mode automatically. No hardcoded colours.
 - **Live polling** — the menu refreshes every 5 seconds while open, so the
   values stay current without manual reopening.
+- **10-minute temperature graph** — the composite temperature of each
+  drive is recorded on every poll into a rolling 10-minute history, persisted
+  to `/tmp/nvme-monitor-temp-history.json` (so a restart keeps the recent
+  curve) and shown as a line graph under the drive's SMART section, colored
+  by the temperature tier, with the **min and max** temperature over the
+  window annotated on the left axis. The **max** marker is tinted by its own
+  temperature tier (green/orange/red) so an over-threshold peak stands out;
+  intermediate thresholds (warm 50 °C, hot 70 °C) crossed at least once are
+  drawn as tier-colored guide lines, and a **time counter** on the right
+  shows how long the temperature stayed at/above each crossed threshold
+  over the window (interpolated to account for the variable sampling rate).
+- **Adaptive refresh on critical temperature** — when a drive is in the red
+  (critical/hot) tier (the drive's `critical_warning` bit 1, or composite
+  ≥ 70 °C), its refresh interval drops to 0.5 s so you watch the temperature
+  curve resolve in near real time. The normal 5 s timer keeps driving the
+  full menu rebuild for everything else.
 - **nvme-cli version awareness** — detects known `nvme-cli` bugs (int32
   overflow in 2.0–2.2; the `nvme list -o json` nested-layout format change in
   2.11–2.12 and 3.0+) and parses both layouts, warning the user when needed.
@@ -113,11 +127,15 @@ pkexec /usr/local/bin/nvme-smart-uninstall.sh
 
 ```
 nvme-monitor@rloutrel.github.com/
-  extension.js        # GNOME Shell entry point: indicator, menu, polling
+  extension.js        # GNOME Shell entry point: indicator, menu, polling,
+                      #   temp history capture, line graph, adaptive refresh
   smartParser.js      # SMART log parsing (vendor parsers), pure module
   tempFormat.js        # Temperature line formatting, pure module
   versionUtils.js      # nvme-cli version detection, pure module
   deviceList.js        # normalize nvme list -o json layouts, pure module
+  tempHistory.js       # rolling per-device temperature history (10 minutes,
+                      #   min/max range), pure module
+  format.js            # endurance formatting + temperature tier color, pure
   stylesheet.css       # Theme-aware styles
   metadata.json        # Shell version, UUID, version
   setup-polkit.sh      # Installs the polkit + wrapper stack (run as root)
@@ -129,15 +147,17 @@ screenshots/           # Screenshots referenced by this README
 ## Testing
 
 Pure modules (`smartParser.js`, `tempFormat.js`, `versionUtils.js`,
-`deviceList.js`) are unit-tested with Node's built-in test runner — no test
-framework, no dependencies:
+`deviceList.js`, `tempHistory.js`, `format.js`) are unit-tested with Node's
+built-in test runner — no test framework, no dependencies:
 
 ```bash
 node --test \
   "nvme-monitor@rloutrel.github.com/test/tempFormat.test.js" \
   "nvme-monitor@rloutrel.github.com/test/smartParser.test.js" \
   "nvme-monitor@rloutrel.github.com/test/versionUtils.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/deviceList.test.js"
+  "nvme-monitor@rloutrel.github.com/test/deviceList.test.js" \
+  "nvme-monitor@rloutrel.github.com/test/format.test.js" \
+  "nvme-monitor@rloutrel.github.com/test/tempHistory.test.js"
 ```
 
 `extension.js` runs inside GNOME Shell (GJS) and cannot be unit-tested

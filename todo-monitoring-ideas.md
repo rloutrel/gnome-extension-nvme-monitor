@@ -13,8 +13,8 @@
   - **Outils** : Données SMART (CrystalDiskInfo, NVMe CLI).
   - **Fréquence** : Quotidienne.
 
-- [ ] **Surveiller le "Percentage Used"**
-  - **Description** : Alerter si *Percentage Used* dépasse **80%** (usure significative).
+- [ ] **Surveiller le "Lifetime Used"**
+  - **Description** : Alerter si *Lifetime Used* dépasse **80%** (usure significative).
   - **Outils** : Données SMART.
   - **Fréquence** : Quotidienne.
 
