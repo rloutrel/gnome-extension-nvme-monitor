@@ -7,8 +7,8 @@ msgstr ""
 "Project-Id-Version: gnome-extension-nvme-monitor 1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/rloutrel/gnome-extension-nvme-monitor/issues\n"
 "POT-Creation-Date: 2025-09-09 00:00+0000\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"PO-Revision-Date: 2025-09-28 00:00+0000\n"
+"Last-Translator: Romain Loutrel <rloutrel@users.noreply.github.com>\n"
 "Language-Team: French <fr@li.org>\n"
 "Language: fr\n"
 "MIME-Version: 1.0\n"
@@ -92,7 +92,7 @@ msgstr "  SMART : indisponible"
 
 #: indicator.js:449
 msgid "  SMART: log out and back in to enable access"
-msgstr "  SMART : déconnectez-vous puis reconnectez-vous pour activer l'acc\u00e8s"
+msgstr "  SMART : déconnectez-vous puis reconnectez-vous pour activer l'accès"
 
 #: indicator.js:458
 msgid "  Stale data"
