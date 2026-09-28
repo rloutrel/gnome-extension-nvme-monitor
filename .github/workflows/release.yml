@@ -1,0 +1,78 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gettext libglib2.0-dev-bin zip
+
+      - name: Validate metadata
+        run: node "nvme-monitor@rloutrel.github.com/test/validateMetadata.js"
+
+      - name: Compile GSettings schema
+        run: glib-compile-schemas --strict "nvme-monitor@rloutrel.github.com/schemas/"
+
+      - name: Compile translations
+        run: |
+          domain="nvme-monitor@rloutrel.github.com"
+          for po in nvme-monitor@rloutrel.github.com/po/*.po; do
+            lang=$(basename "$po" .po)
+            dir="nvme-monitor@rloutrel.github.com/locale/$lang/LC_MESSAGES"
+            mkdir -p "$dir"
+            msgfmt --check --output-file="$dir/$domain.mo" "$po"
+          done
+
+      - name: Assemble extension zip
+        run: |
+          uuid="nvme-monitor@rloutrel.github.com"
+          zip "${uuid}.zip" \
+            "${uuid}/extension.js" \
+            "${uuid}/indicator.js" \
+            "${uuid}/logger.js" \
+            "${uuid}/subprocess.js" \
+            "${uuid}/icons.js" \
+            "${uuid}/tempChart.js" \
+            "${uuid}/v2flow.js" \
+            "${uuid}/v2decisions.js" \
+            "${uuid}/smartStatus.js" \
+            "${uuid}/usageFormatting.js" \
+            "${uuid}/overlayGeometry.js" \
+            "${uuid}/tempTiers.js" \
+            "${uuid}/smartParser.js" \
+            "${uuid}/tempFormat.js" \
+            "${uuid}/tempUnit.js" \
+            "${uuid}/versionUtils.js" \
+            "${uuid}/deviceList.js" \
+            "${uuid}/tempHistory.js" \
+            "${uuid}/format.js" \
+            "${uuid}/diskUsage.js" \
+            "${uuid}/diskUsageModel.js" \
+            "${uuid}/diskDiscovery.js" \
+            "${uuid}/lvmReport.js" \
+            "${uuid}/polkitManager.js" \
+            "${uuid}/prefs.js" \
+            "${uuid}/stylesheet.css" \
+            "${uuid}/metadata.json" \
+            "${uuid}/setup-polkit.sh" \
+            "${uuid}/schemas/org.gnome.shell.extensions.nvme-monitor.gschema.xml" \
+            "${uuid}/schemas/gschemas.compiled" \
+            "${uuid}/icons" \
+            "${uuid}/locale"
+          unzip -l "${uuid}.zip"
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: nvme-monitor@rloutrel.github.com.zip
