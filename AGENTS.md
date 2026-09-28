@@ -18,9 +18,13 @@ endurance) in the top-bar menu. Targets **GNOME Shell 50/51** (ESM imports
 
 ```text
 nvme-monitor@rloutrel.github.com/
-  extension.js         # GNOME Shell entry point: Indicator, menu, polling,
-                       #   icon loading, command execution, nvme-cli version
-                       #   check. Imports all pure modules below.
+  extension.js         # GNOME Shell entry point: enable/disable lifecycle only.
+  indicator.js         # Panel indicator: menu, device rendering, polling,
+                       #   temp history capture, v2 stack install/uninstall.
+  tempChart.js         # Temperature line graph (St.DrawingArea + Cairo).
+  subprocess.js        # GJS subprocess/pkexec helpers, nvme-cli version check.
+  logger.js            # Unified debug/warn/error + notification helpers.
+  icons.js             # Bundled icon registry + Gio.FileIcon helper.
   smartParser.js       # PURE: SMART log parsing. BaseParser + vendor parsers
                        #   (Samsung, WD, Micron, Crucial, SKHynix, Intel).
                        #   getParser() factory + parseSmart() convenience.
@@ -46,11 +50,14 @@ nvme-monitor@rloutrel.github.com/
 ### Pure vs GJS modules
 
 A hard rule: **`smartParser.js`, `tempFormat.js`, `versionUtils.js`,
-`deviceList.js`, and `tempHistory.js` are pure modules with zero GJS/GObject
+`deviceList.js`, `tempHistory.js`, `tempUnit.js`, `polkitManager.js`,
+`tempTiers.js`, `usageFormatting.js`, and `overlayGeometry.js` are pure
+modules with zero GJS/GObject
 imports.** They run under plain Node and are unit-tested there. Do **not** add `gi://` or
 `resource:///` imports to these files. Anything that touches `Gio`, `GLib`,
-`St`, `Clutter`, `Main`, or GObject belongs in `extension.js` (or a future
-GJS-only module), never in a pure module.
+`St`, `Clutter`, `Main`, or GObject belongs in a GJS-only module
+(`extension.js`, `indicator.js`, `tempChart.js`, `subprocess.js`, ...), never
+in a pure module.
 
 ### Data flow
 
@@ -93,7 +100,7 @@ GJS-only module), never in a pure module.
 ### Logging
 
 Follow the [GJS debugging guide](https://gjs.guide/extensions/development/debugging.html#logging).
-All log helpers live in `extension.js` and prefix with `LOG_PREFIX = '[NVMe-monitor]'`:
+All log helpers live in `logger.js` and prefix with `LOG_PREFIX = '[NVMe-monitor]'`:
 
 - `_debug(msg)` → `console.debug` — dev-only info
 - `_warn(msg)` → `console.warn` — unexpected, possible bugs
@@ -168,11 +175,12 @@ The extension parses both layouts (`deviceList.js`) and warns affected users
 The extension is internationalized with gettext (i18n). GNOME Shell
 auto-initializes the domain named in `metadata.json` (`gettext-domain`).
 
-- All user-visible strings in `extension.js` are wrapped in `_()`, imported
+- All user-visible strings in GJS modules (`indicator.js`, `subprocess.js`,
+  `prefs.js`) are wrapped in `_()`, imported
   from `resource:///org/gnome/shell/extensions/extension.js`.
 - **Pure modules must stay free of gettext.** `tempFormat.js` accepts
   translated labels (Controller/NAND/Sensor) via an optional `labels`
-  argument and falls back to English defaults; the caller (`extension.js`)
+  argument and falls back to English defaults; the caller (`indicator.js`)
   passes `_(...)` results in.
 - Translation sources live in `po/`:
   - `POTFILES` — list of files containing translatable strings.
@@ -226,8 +234,9 @@ node --test \
 - Test data is real `nvme smart-log` / `nvme list` JSON where available.
 - Verify pure modules with `node --check <file>` before committing.
 
-`extension.js` cannot be unit-tested outside GNOME Shell (GJS imports); verify
-it with `node --check extension.js` for syntax only.
+`extension.js`, `indicator.js` and the other GJS modules cannot be unit-tested
+outside GNOME Shell (GJS imports); verify them with `node --check` for syntax
+only.
 
 ## Commit style
 

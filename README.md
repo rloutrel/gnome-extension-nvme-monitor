@@ -127,8 +127,13 @@ pkexec /usr/local/bin/nvme-smart-uninstall.sh
 
 ```
 nvme-monitor@rloutrel.github.com/
-  extension.js        # GNOME Shell entry point: indicator, menu, polling,
-                      #   temp history capture, line graph, adaptive refresh
+  extension.js        # GNOME Shell entry point: enable/disable lifecycle only
+  indicator.js       # Panel indicator: menu, device rendering, polling,
+                      #   temp history capture, adaptive refresh
+  tempChart.js       # Temperature line graph (St.DrawingArea + Cairo)
+  subprocess.js      # GJS subprocess/pkexec helpers, nvme-cli version check
+  logger.js          # Unified debug/warn/error + notification helpers
+  icons.js           # Bundled icon registry + Gio.FileIcon helper
   smartParser.js      # SMART log parsing (vendor parsers), pure module
   tempFormat.js        # Temperature line formatting, pure module
   versionUtils.js      # nvme-cli version detection, pure module
@@ -160,7 +165,7 @@ node --test \
   "nvme-monitor@rloutrel.github.com/test/tempHistory.test.js"
 ```
 
-`extension.js` runs inside GNOME Shell (GJS) and cannot be unit-tested
+`extension.js` and `indicator.js` run inside GNOME Shell (GJS) and cannot be unit-tested
 outside it; check it for syntax only with `node --check`.
 
 ## License

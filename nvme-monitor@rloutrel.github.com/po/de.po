@@ -16,11 +16,11 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: extension.js:145
+#: subprocess.js:143
 msgid "nvme-cli compatibility warning"
 msgstr "nvme-cli Kompatibilitäts-Warnung"
 
-#: extension.js:146 extension.js:203
+#: indicator.js:87 subprocess.js:144
 msgid "NVMe Monitor"
 msgstr "NVMe Monitor"
 
@@ -44,27 +44,26 @@ msgstr "Credits"
 msgid "Assisted by"
 msgstr "Unterstützt von"
 
-#: extension.js:233
+#: indicator.js:132
 msgid "Enable NVMe smart-log access"
 msgstr "NVMe smart-log-Zugriff aktivieren"
 
-#: extension.js:404
+#: indicator.js:163
 msgid "Preferences"
 msgstr "Einstellungen"
 
-#: extension.js:369
+#: indicator.js:335
 msgid "nvme-cli not installed"
 msgstr "nvme-cli ist nicht installiert"
 
-#: extension.js:374
+#: indicator.js:341
 msgid "No NVMe devices found"
 msgstr "Keine NVMe-Geräte gefunden"
 
-#: extension.js:415 extension.js:418
+#: indicator.js:414 indicator.js:417
 msgid "Available Spare"
 msgstr "Verfügbare Reserve"
 
-#: extension.js:419
 msgid ""
 "Reserved capacity the drive can swap in to replace failing blocks. Critical "
 "below 15%, warning below 50%, OK otherwise."
@@ -72,11 +71,10 @@ msgstr ""
 "Reservekapazität, die das Laufwerk zum Ersetzen fehlerhafter Blöcke einsetzen "
 "kann. Kritisch unter 15 %, Warnung unter 50 %, sonst OK."
 
-#: extension.js:426 extension.js:429
+#: indicator.js:425 indicator.js:428
 msgid "Lifetime Used"
 msgstr "Verbrauchte Lebensdauer"
 
-#: extension.js:430
 msgid ""
 "Estimated portion of the drive endurance consumed. OK below 50%, warning up "
 "to 85%, critical above."
@@ -84,145 +82,158 @@ msgstr ""
 "Geschätzter Anteil der verbrauchten Laufwerkshaltbarkeit. OK unter 50 %, "
 "Warnung bis 85 %, kritisch darüber."
 
-#: extension.js:443
+#: indicator.js:445
 msgid "  SMART: parse error"
 msgstr "  SMART: Auswertungsfehler"
 
-#: extension.js:447
+#: indicator.js:451
 msgid "  SMART: unavailable"
 msgstr "  SMART: nicht verfügbar"
 
-#: extension.js:662
+#: indicator.js:449
 msgid "  SMART: log out and back in to enable access"
 msgstr "  SMART: zum Aktivieren ab- und wieder anmelden"
 
-#: extension.js:671
+#: indicator.js:458
 msgid "  Stale data"
 msgstr "  Veraltete Daten"
 
-#: extension.js:450
+#: indicator.js:454
 msgid "  Install NVMe Stack for SMART data"
 msgstr "  NVMe-Stack für SMART-Daten installieren"
 
-#: extension.js:886
+#: indicator.js:1342
 msgid "Controller"
 msgstr "Controller"
 
-#: extension.js:887
+#: indicator.js:1343
 msgid "NAND"
 msgstr "NAND"
 
-#: extension.js:888
+#: indicator.js:1344
 msgid "Sensor"
 msgstr "Sensor"
 
-#: extension.js:910
+#: indicator.js:1370
 msgid "Power Cycles"
 msgstr "Einschaltzyklen"
 
-#: extension.js:914
+#: indicator.js:1374
 msgid "Power On"
 msgstr "Betriebsstunden"
 
-#: extension.js:918
+#: indicator.js:1378
 msgid "Unsafe Shutdowns"
 msgstr "Unsichere Herunterfahr-Vorgänge"
 
-#: extension.js:935
+#: indicator.js:1395
 msgid "Data Read"
 msgstr "Gelesene Daten"
 
-#: extension.js:942
+#: indicator.js:1402
 msgid "Data Written"
 msgstr "Geschriebene Daten"
 
-#: extension.js:951
+#: indicator.js:1411
 msgid "Host Reads"
 msgstr "Host-Lesezugriffe"
 
-#: extension.js:958
+#: indicator.js:1418
 msgid "Host Writes"
 msgstr "Host-Schreibzugriffe"
 
-#: extension.js:968
+#: indicator.js:1428
 msgid "Media Errors"
 msgstr "Medienfehler"
 
-#: extension.js:971
+#: indicator.js:1431
 msgid "Critical Warning"
 msgstr "Kritische Warnung"
 
-#: extension.js:996
+#: indicator.js:1457
 msgid "setup-polkit.sh not found. Place it in the extension directory."
 msgstr "setup-polkit.sh nicht gefunden. Platzieren Sie es im Erweiterungsverzeichnis."
 
-#: extension.js:1014
+#: indicator.js:1474
 msgid "NVMe polkit stack installed!"
 msgstr "NVMe polkit-Stack installiert!"
 
-#: extension.js:1014
+#: indicator.js:1473
 msgid "Please log out and back in for new group membership."
 msgstr "Bitte ab- und wieder anmelden, damit die neue Gruppenmitgliedschaft wirksam wird."
 
-#: extension.js:1882
+#: indicator.js:1481 indicator.js:1488
 msgid "Installation failed"
 msgstr "Installation fehlgeschlagen"
 
-#: extension.js:1056
+#: indicator.js:1524
 msgid "Uninstall script not found."
 msgstr "Deinstallationsskript nicht gefunden."
 
-#: extension.js:1074
+#: indicator.js:1538
 msgid "NVMe polkit stack uninstalled."
 msgstr "NVMe polkit-Stack deinstalliert."
 
-#: extension.js:1946
+#: indicator.js:1545 indicator.js:1552
 msgid "Uninstall failed"
 msgstr "Deinstallation fehlgeschlagen"
 
+#: indicator.js:764
 msgid "Device"
 msgstr "Gerät"
 
+#: indicator.js:768
 msgid "Mount"
 msgstr "Einhängepunkt"
 
+#: indicator.js:765
 msgid "Type"
 msgstr "Typ"
 
+#: indicator.js:751
 msgid "Unknown"
 msgstr "Unbekannt"
 
+#: indicator.js:853
 msgid "Usage"
 msgstr "Belegung"
 
+#: indicator.js:854
 msgid "used"
 msgstr "belegt"
 
+#: indicator.js:855
 msgid "available"
 msgstr "frei"
 
+#: indicator.js:856
 msgid "total"
 msgstr "gesamt"
 
+#: indicator.js:858
 msgid "Disk usage"
 msgstr "Festplattenbelegung"
 
-#: extension.js:1217
+#: indicator.js:811
 msgid "Click to know more"
 msgstr "Klicken Sie für weitere Informationen"
 
+#: indicator.js:1264
 msgid "Logical volumes"
 msgstr "Logische Volumes"
 
-#: extension.js:1173
+#: indicator.js:771
 msgid "Contains"
 msgstr "Enthält"
 
+#: indicator.js:1296
 msgid "LVM physical volume"
 msgstr "LVM-physisches Volume"
 
+#: indicator.js:1297
 msgid "Volume group"
 msgstr "Volumegruppe"
 
+#: indicator.js:351
 msgid "Not assigned"
 msgstr "Nicht zugewiesen"
