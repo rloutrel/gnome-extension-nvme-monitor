@@ -60,7 +60,8 @@ import { WRAPPER_PATH, SETUP_SCRIPT_NAME } from './polkitManager.js';
 // Persisted rolling temperature history (last 30 minutes, per device). The file
 // is written atomically by GLib.file_set_contents after each capture so a
 // crash/restart keeps the recent curve, and it is pruned on load.
-const TEMP_HISTORY_PATH = '/tmp/nvme-monitor-temp-history.json';
+const TEMP_HISTORY_PATH = GLib.build_filenamev(
+    [GLib.get_user_runtime_dir(), 'nvme-monitor-temp-history.json']);
 
 // Normal polling interval (seconds), matching the existing live polling.
 const POLL_INTERVAL_S = 5;
@@ -81,7 +82,8 @@ const SECTION_ICON_SIZE = 22;
 const VALUE_ICON_SIZE = 16;
 
 const PANEL_WARNING_CLASS = 'nvme-panel-warning';
-const DISK_USAGE_DEBUG_DIR = '/tmp/found_dev_path';
+const DISK_USAGE_DEBUG_DIR = GLib.build_filenamev(
+    [GLib.get_user_runtime_dir(), 'found_dev_path']);
 
 // Global fail counter for the uninstall-not-found loop (see v2flow.js).
 let _uninstallNotFoundCount = 0;

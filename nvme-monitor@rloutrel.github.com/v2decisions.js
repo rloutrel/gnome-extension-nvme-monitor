@@ -12,7 +12,10 @@ export const KILL_THRESHOLD = 4;
 export function buildSetupPath(extensionPath, setupScriptName = 'setup-polkit.sh') {
     if (!extensionPath)
         return setupScriptName;
-    return `${extensionPath.replace(/\/+$/, '')}/${setupScriptName}`;
+    let dir = extensionPath;
+    while (dir.length > 1 && dir.endsWith('/'))
+        dir = dir.slice(0, -1);
+    return `${dir}/${setupScriptName}`;
 }
 
 // Decide what to do after an "uninstall script not found" failure.

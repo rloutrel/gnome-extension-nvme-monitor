@@ -2,12 +2,16 @@ const DEFAULT_USED_COLOR = [0.68, 0.88, 0.70];
 
 export function parseFilesystemUsage(output) {
     return String(output || '').trim().split(/\n/).slice(1).map(line => {
-        const match = line.trim().match(/^(\S+)\s+(\S+)\s+\d+\s+(\d+)\s+(\d+)\s+(\d+)%\s+(.+)$/);
-        if (!match) return null;
-        const [, source, filesystem, usedK, availK, pctText, mount] = match;
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 7)
+            return null;
+        const [source, filesystem, , usedK, availK, pctText, ...mountParts] = parts;
+        if (!pctText.endsWith('%'))
+            return null;
+        const mount = mountParts.join(' ');
         const used = Number(usedK);
         const avail = Number(availK);
-        const percent = Number(pctText);
+        const percent = Number(pctText.slice(0, -1));
         const total = used + avail;
         if (!Number.isFinite(percent) || !Number.isFinite(total) || total <= 0) return null;
         return {source, filesystem, mount, used, avail, total, percent, isLvm: source.startsWith('/dev/mapper/')};
@@ -21,6 +25,14 @@ export function isSourceOnDisk(source, disk) {
     const suffix = sourcePath.slice(diskPath.length);
     return sourcePath.startsWith(`${diskPath}p`) && /^p\d+$/.test(suffix)
         || sourcePath.startsWith(`${diskPath}n`) && /^n\d+$/.test(suffix);
+}
+
+export function stripPartitionSuffix(device) {
+    const paren = device.lastIndexOf('(');
+    const end = device.lastIndexOf(')');
+    if (paren === -1 || end !== device.length - 1 || paren > end)
+        return device;
+    return device.slice(0, paren);
 }
 
 export function normalizeDevicePath(source) {
@@ -42,7 +54,7 @@ export function buildDiskUsageEntries(devicePath, filesystemEntries, lvmInfo, la
                     if (lv.volumeGroup !== pv.volumeGroup) return false;
                     if (!lv.devices) return true;
                     return String(lv.devices).split(',').some(device =>
-                        normalizeDevicePath(device.trim().replace(/\([^)]*\)$/, '')) === pvPath);
+                        normalizeDevicePath(stripPartitionSuffix(device.trim())) === pvPath);
                 })
                 .map(lv => lv.logicalVolume || lv.source)
                 .filter(Boolean)
