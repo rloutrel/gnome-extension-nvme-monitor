@@ -10,6 +10,7 @@
 //   onUninstalled()                stack uninstalled (stop polling + refresh)
 
 import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 
 import {gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -23,6 +24,27 @@ import {
 } from './v2decisions.js';
 
 export {KILL_THRESHOLD, buildSetupPath, handleUninstallNotFound};
+
+// Request that GNOME Shell disable this extension via D-Bus. Used to break
+// the uninstall-not-found toggle loop once the kill threshold is reached.
+export function disableSelfViaDbus(uuid) {
+    try {
+        const dbus = Gio.DBus.session;
+        dbus.call_sync(
+            'org.gnome.Shell.Extensions',
+            '/org/gnome/Shell/Extensions',
+            'org.gnome.Shell.Extensions',
+            'DisableExtension',
+            new GLib.Variant('(s)', [uuid]),
+            null,
+            Gio.DBusCallFlags.NONE,
+            -1,
+            null
+        );
+    } catch (e) {
+        _warn(`Could not disable via D-Bus: ${e.message}`);
+    }
+}
 
 // Install the polkit stack via setup-polkit.sh (pkexec, async). Returns
 // {started}: false when the setup script is missing (toggle disabled).
