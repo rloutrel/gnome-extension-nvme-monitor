@@ -2106,10 +2106,8 @@ export default class IndicatorExampleExtension extends Extension {
             this._settings.disconnect(this._settingsId);
             this._settingsId = null;
         }
-        if (this._settings) {
-            this._settings.run_dispose();
-            this._settings = null;
-        }
+        this._settings = null;
+        _uninstallNotFoundCount = 0;
         _debug('disable() exit');
     }
 }
