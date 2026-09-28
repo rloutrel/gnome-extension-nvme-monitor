@@ -6,14 +6,13 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
-import Gio from 'gi://Gio';
 
 import {gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import {PopupBaseMenuItem, PopupMenuItem, PopupSwitchMenuItem, PopupSeparatorMenuItem, PopupMenuSection} from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {_debug, _warn, _error, notify, notifyError} from './logger.js';
+import {_debug, _warn, notifyError} from './logger.js';
 import {
     runCommandSync,
     fileExists,
@@ -21,10 +20,16 @@ import {
     checkCurrentUserInSmartGroup,
     checkUninstallAvailable,
     runPkexec,
-    runPkexecAsync,
 } from './subprocess.js';
 import {ICONS, DARK_ICON_VARIANTS, fileIcon} from './icons.js';
 import {createTempChartArea} from './tempChart.js';
+import {buildHealthGauges, getSmartStatusLine} from './smartStatus.js';
+import {
+    handleUninstallNotFound,
+    installV2Stack,
+    uninstallV2Stack,
+    disableSelfViaDbus,
+} from './v2flow.js';
 import {
     TEMP_HOT_C,
     isCriticalTemp,
@@ -37,7 +42,7 @@ import {computeOverlayPosition} from './overlayGeometry.js';
 // Import the SMART parser
 import { parseSmart } from './smartParser.js';
 // Import endurance value formatting + temperature tier color (pure, unit-tested)
-import { formatCompactNumber, formatDataUnits, formatPowerOnHours, spareGaugeColor, usedGaugeColor, COLOR_TRACK } from './format.js';
+import { formatCompactNumber, formatDataUnits, formatPowerOnHours, COLOR_TRACK } from './format.js';
 // Import temperature line formatting (pure, unit-tested)
 import { formatTemperatureLine, formatSensorRows } from './tempFormat.js';
 import { calculateUsageSegmentWidths, createUsageBarFromSegments } from './diskUsage.js';
@@ -50,7 +55,7 @@ import { TEMP_UNIT_CELSIUS } from './tempUnit.js';
 // Import rolling per-device temperature history (pure, unit-tested).
 import { TempHistory, TEMP_HISTORY_WINDOW_MS } from './tempHistory.js';
 // Import polkit management (pure, unit-tested)
-import { WRAPPER_PATH, UNINSTALL_PATH, SETUP_SCRIPT_NAME } from './polkitManager.js';
+import { WRAPPER_PATH, SETUP_SCRIPT_NAME } from './polkitManager.js';
 
 // Persisted rolling temperature history (last 30 minutes, per device). The file
 // is written atomically by GLib.file_set_contents after each capture so a
@@ -78,10 +83,7 @@ const VALUE_ICON_SIZE = 16;
 const PANEL_WARNING_CLASS = 'nvme-panel-warning';
 const DISK_USAGE_DEBUG_DIR = '/tmp/found_dev_path';
 
-// Global fail counter — incremented each time "Uninstall script not found"
-// is reached.  When it reaches KILL_THRESHOLD, the extension disables itself
-// to break the infinite toggle loop.
-const KILL_THRESHOLD = 4;
+// Global fail counter for the uninstall-not-found loop (see v2flow.js).
 let _uninstallNotFoundCount = 0;
 
 export const Indicator = GObject.registerClass(
@@ -410,30 +412,7 @@ export const Indicator = GObject.registerClass(
                 this._setPanelWarning(
                     this._panelWarningActive || this._hasHotTemperatureSensor(parsedSmart.temperature));
                 this._lastSmartReadAt[dev.DevicePath] = now;
-                const gauges = [];
-                if (parsedSmart.health.availableSparePercent !== undefined) {
-                    const pct = parsedSmart.health.availableSparePercent;
-                    gauges.push({
-                        label: _('Available Spare'),
-                        percent: pct,
-                        color: spareGaugeColor(pct),
-                        title: _('Available Spare'),
-                        body: _('Reserved capacity the drive can swap in to replace failing blocks. ' +
-                               'Critical below 15%, warning below 50%, OK otherwise.'),
-                    });
-                }
-                if (parsedSmart.health.percentageUsed !== undefined) {
-                    const pct = parsedSmart.health.percentageUsed;
-                    gauges.push({
-                        label: _('Lifetime Used'),
-                        percent: pct,
-                        color: usedGaugeColor(pct),
-                        title: _('Lifetime Used'),
-                        body: _('Estimated portion of the drive endurance consumed. ' +
-                               'OK below 50%, warning up to 85%, critical above.'),
-                    });
-                }
-                if (gauges.length > 0) healthGauges = gauges;
+                healthGauges = buildHealthGauges(parsedSmart, this._smartLabels());
             }
 
             // Device header: icon + bold model name + health gauges
@@ -443,18 +422,14 @@ export const Indicator = GObject.registerClass(
             const diskUsage = this._collectDiskUsageInfo(dev.DevicePath, lvmInfo);
             this._addDeviceMeta(dev.DevicePath, dev.Firmware, null, diskUsage);
 
-            if (v2Installed) {
-                if (smartParseError) {
-                    this._addInfoLine(_('  SMART: parse error'));
-                } else if (smartObj) {
-                    this._addSmartInfo(smartObj, dev.ModelNumber);
-                } else if (!checkCurrentUserInSmartGroup()) {
-                    this._addInfoLine(_('  SMART: log out and back in to enable access'), 'nvme-smart-info');
-                } else {
-                    this._addInfoLine(_('  SMART: unavailable'), 'nvme-smart-info');
-                }
+            if (v2Installed && smartObj && !smartParseError) {
+                this._addSmartInfo(smartObj, dev.ModelNumber);
             } else {
-                this._addInfoLine(_('  Install NVMe Stack for SMART data'), 'nvme-smart-info');
+                const statusLine = getSmartStatusLine(
+                    {v2Installed, smartObj, smartParseError, inGroup: checkCurrentUserInSmartGroup()},
+                    this._smartLabels());
+                if (statusLine)
+                    this._addInfoLine(statusLine.text, statusLine.styleClass);
             }
 
             if (this._isStaleSmartData(dev.DevicePath, now)) {
@@ -755,6 +730,21 @@ export const Indicator = GObject.registerClass(
 
         _describeDiskUsageEntry(entry) {
             return describeDiskUsageEntry(entry, this._usageLabels());
+        }
+
+        _smartLabels() {
+            return {
+                availableSpare: _('Available Spare'),
+                lifetimeUsed: _('Lifetime Used'),
+                spareBody: _('Reserved capacity the drive can swap in to replace failing blocks. ' +
+                              'Critical below 15%, warning below 50%, OK otherwise.'),
+                usedBody: _('Estimated portion of the drive endurance consumed. ' +
+                            'OK below 50%, warning up to 85%, critical above.'),
+                install: _('  Install NVMe Stack for SMART data'),
+                parseError: _('  SMART: parse error'),
+                relogin: _('  SMART: log out and back in to enable access'),
+                unavailable: _('  SMART: unavailable'),
+            };
         }
 
         _usageLabels() {
@@ -1402,113 +1392,51 @@ export const Indicator = GObject.registerClass(
         // v2: Install the new polkit stack via setup-polkit.sh
         // -------------------------------------------------------------------
         _installV2Stack() {
-            const setupPath = GLib.build_filenamev([this._extensionPath || '', SETUP_SCRIPT_NAME]);
-            const wasInSmartGroup = checkCurrentUserInSmartGroup();
-            _debug(`_installV2Stack: setupPath=${setupPath}`);
-
-            if (!GLib.file_test(setupPath, GLib.FileTest.EXISTS)) {
-                _warn(`setup-polkit.sh not found: ${setupPath}`);
-                notifyError(_('setup-polkit.sh not found. Place it in the extension directory.'));
-                this._v2Toggle.setSensitive(false);
-                this._v2Updating = false;
-                return;
-            }
-
-            _debug('Running pkexec setup-polkit.sh...');
-this._v2Toggle.setSensitive(false);
-runPkexecAsync([setupPath]).then(result => {
-    this._v2Toggle.setSensitive(true);
-    if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
-    if (result.stdout) _debug(`stdout: ${result.stdout.trim()}`);
-    if (result.ok && result.exitCode === 0) {
-        _debug('Installation complete');
-        const body = wasInSmartGroup
-            ? ''
-            : _('Please log out and back in for new group membership.');
-        notify(_('NVMe polkit stack installed!'), body);
-        this._updateV2ToggleState(true);
-        this._startPolling();
-        this._refreshDevices();
-    } else {
-        _warn(`Installation failed (exit code ${result.exitCode}): ${result.stderr || result.stdout}`);
-        const errorMsg = result.stderr ? result.stderr.trim() : `Exit code: ${result.exitCode}`;
-        notifyError(_('Installation failed'), errorMsg);
-        this._updateV2ToggleState(false);
-    }
-    this._v2Updating = false;
-}).catch(e => {
-    this._v2Toggle.setSensitive(true);
-    _warn(`Installation failed: ${e.message}`);
-    notifyError(_('Installation failed'), e.message);
-    this._updateV2ToggleState(false);
-    this._v2Updating = false;
-});
+            installV2Stack({
+                extensionPath: this._extensionPath,
+                wasInSmartGroup: checkCurrentUserInSmartGroup(),
+                ui: this._v2Ui(),
+            });
         }
-
         // -------------------------------------------------------------------
         // v2: Uninstall the polkit stack via nvme-smart-uninstall.sh
         // -------------------------------------------------------------------
         _uninstallV2Stack() {
             if (!checkUninstallAvailable()) {
-                _uninstallNotFoundCount++;
-                _debug(`Uninstall script not found. (count=${_uninstallNotFoundCount}/${KILL_THRESHOLD})`);
-
-                if (_uninstallNotFoundCount >= KILL_THRESHOLD) {
-                    _error(`Kill threshold reached (${KILL_THRESHOLD}). Disabling extension to break loop.`);
-                    notifyError(`NVMe Monitor`, `Loop detected — extension disabled.`);
-                    try {
-                        const dbus = Gio.DBus.session;
-                        dbus.call_sync(
-                            'org.gnome.Shell.Extensions',
-                            '/org/gnome/Shell/Extensions',
-                            'org.gnome.Shell.Extensions',
-                            'DisableExtension',
-                            new GLib.Variant('(s)', ['nvme-monitor@rloutrel.github.com']),
-                            null,
-                            Gio.DBusCallFlags.NONE,
-                            -1,
-                            null
-                        );
-                    } catch (e) {
-                        _warn(`Could not disable via D-Bus: ${e.message}`);
-                    }
+                const {count, action} = handleUninstallNotFound(_uninstallNotFoundCount, {
+                    notifyError,
+                    _,
+                });
+                _uninstallNotFoundCount = count;
+                if (action === 'disable') {
+                    disableSelfViaDbus('nvme-monitor@rloutrel.github.com');
                     return;
                 }
-
                 notifyError(_('Uninstall script not found.'));
                 this._updateV2ToggleState(true);
                 this._v2Updating = false;
                 return;
             }
-
-            _debug('Running pkexec nvme-smart-uninstall.sh...');
-this._v2Toggle.setSensitive(false);
-runPkexecAsync([UNINSTALL_PATH]).then(result => {
-    this._v2Toggle.setSensitive(true);
-    if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
-    if (result.stdout) _debug(`stdout: ${result.stdout.trim()}`);
-    if (result.ok && result.exitCode === 0) {
-        _debug('Uninstall complete');
-        notify(_('NVMe polkit stack uninstalled.'), '');
-        this._updateV2ToggleState(false);
-        this._stopPolling();
-        this._refreshDevices();
-    } else {
-        _warn(`Uninstall failed (exit code ${result.exitCode}): ${result.stderr || result.stdout}`);
-        const errorMsg = result.stderr ? result.stderr.trim() : `Exit code: ${result.exitCode}`;
-        notifyError(_('Uninstall failed'), errorMsg);
-        this._updateV2ToggleState(true);
-    }
-    this._v2Updating = false;
-}).catch(e => {
-    this._v2Toggle.setSensitive(true);
-    _warn(`Uninstall failed: ${e.message}`);
-    notifyError(_('Uninstall failed'), e.message);
-    this._updateV2ToggleState(true);
-    this._v2Updating = false;
-});
+            uninstallV2Stack({ui: this._v2Ui()});
         }
 
+        _v2Ui() {
+            return {
+                setToggleSensitive: s => this._v2Toggle.setSensitive(s),
+                setToggleState: a => this._updateV2ToggleState(a),
+                setUpdating: u => {
+                    this._v2Updating = u;
+                },
+                onInstalled: () => {
+                    this._startPolling();
+                    this._refreshDevices();
+                },
+                onUninstalled: () => {
+                    this._stopPolling();
+                    this._refreshDevices();
+                },
+            };
+        }
 
         destroy() {
             this._hideExplanationOverlay();
