@@ -24,12 +24,36 @@ msgstr ""
 msgid "NVMe Monitor"
 msgstr ""
 
+#: prefs.js:19
+msgid "General"
+msgstr ""
+
+#: prefs.js:25
+msgid "Temperature"
+msgstr ""
+
+#: prefs.js:26
+msgid "Unit used to display drive temperatures"
+msgstr ""
+
+#: prefs.js:65
+msgid "Credits"
+msgstr ""
+
+#: prefs.js:70
+msgid "Assisted by"
+msgstr ""
+
 #: extension.js:203
 msgid "NVMe Monitor"
 msgstr ""
 
 #: extension.js:233
 msgid "Enable NVMe smart-log access"
+msgstr ""
+
+#: extension.js:404
+msgid "Preferences"
 msgstr ""
 
 #: extension.js:369
@@ -66,6 +90,14 @@ msgstr ""
 
 #: extension.js:447
 msgid "  SMART: unavailable"
+msgstr ""
+
+#: extension.js:662
+msgid "  SMART: log out and back in to enable access"
+msgstr ""
+
+#: extension.js:671
+msgid "  Stale data"
 msgstr ""
 
 #: extension.js:450
@@ -132,8 +164,8 @@ msgstr ""
 msgid "Please log out and back in for new group membership."
 msgstr ""
 
-#: extension.js:1019
-msgid "Installation failed (exit code "
+#: extension.js:1882
+msgid "Installation failed"
 msgstr ""
 
 #: extension.js:1056
@@ -144,8 +176,8 @@ msgstr ""
 msgid "NVMe polkit stack uninstalled."
 msgstr ""
 
-#: extension.js:1079
-msgid "Uninstall failed (exit code "
+#: extension.js:1946
+msgid "Uninstall failed"
 msgstr ""
 
 msgid "Device"
@@ -175,7 +207,15 @@ msgstr ""
 msgid "Disk usage"
 msgstr ""
 
+#: extension.js:1217
+msgid "Click to know more"
+msgstr ""
+
 msgid "Logical volumes"
+msgstr ""
+
+#: extension.js:1173
+msgid "Contains"
 msgstr ""
 
 msgid "LVM physical volume"

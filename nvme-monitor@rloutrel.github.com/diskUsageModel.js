@@ -1,4 +1,4 @@
-const DEFAULT_USED_COLOR = [0.75, 0.11, 0.14];
+const DEFAULT_USED_COLOR = [0.68, 0.88, 0.70];
 
 export function parseFilesystemUsage(output) {
     return String(output || '').trim().split(/\n/).slice(1).map(line => {

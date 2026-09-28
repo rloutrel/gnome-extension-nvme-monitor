@@ -7,7 +7,14 @@
  * Translatable labels ("Controller", "NAND", "Sensor") are passed in by the
  * caller via the `labels` option so this module stays free of gettext. When
  * omitted, English defaults are used (preserving the existing test suite).
+ *
+ * The display unit is passed in via the `unit` option ('celsius' or
+ * 'fahrenheit'); values are stored internally in Celsius and converted only
+ * for display. When omitted, Celsius is used (preserving the existing test
+ * suite).
  */
+
+import { toDisplayTemp, tempSuffix } from './tempUnit.js';
 
 // Default English labels, used when no `labels` option is provided (e.g.
 // unit tests) or when a requested label is missing.
@@ -25,9 +32,13 @@ function resolveLabels(labels) {
 // Format a single temperature value with one decimal place using a French
 // decimal comma (e.g. 42 -> "42,0", 42.5 -> "42,5"). Returns '?' for
 // null/undefined so a missing sensor still renders a readable placeholder.
-export function formatTempCelsius(tempC) {
+//
+// `unit` (optional): 'celsius' or 'fahrenheit' (see tempUnit.js); the value
+// is converted before formatting when Fahrenheit is requested.
+export function formatTempCelsius(tempC, unit) {
     if (tempC === null || tempC === undefined) return '?';
-    return Number(tempC).toFixed(1).replace('.', ',');
+    const display = toDisplayTemp(tempC, unit) ?? tempC;
+    return Number(display).toFixed(1).replace('.', ',');
 }
 
 // Build the main composite temperature line, appending manufacturer-specific
@@ -40,19 +51,20 @@ export function formatTempCelsius(tempC) {
 // No sensors → just the composite: "42,0°C"
 //
 // `labels` (optional): { controller, nand, sensor } translated labels.
-export function formatTemperatureLine(manufacturer, composite, sensors, labels) {
+// `unit` (optional): 'celsius' or 'fahrenheit' (see tempUnit.js).
+export function formatTemperatureLine(manufacturer, composite, sensors, labels, unit) {
     if (composite === null || composite === undefined) return null;
-
     const L = resolveLabels(labels);
-    let line = `${formatTempCelsius(composite)}\u00b0C`;
+    const suffix = tempSuffix(unit);
+    let line = `${formatTempCelsius(composite, unit)}${suffix}`;
 
     const sensorList = sensors || [];
     let detail = '';
 
     if (manufacturer === 'Samsung' && sensorList.length >= 2) {
-        detail = `${L.controller}: ${formatTempCelsius(sensorList[0])}\u00b0C; ${L.nand}: ${formatTempCelsius(sensorList[1])}\u00b0C`;
+        detail = `${L.controller}: ${formatTempCelsius(sensorList[0], unit)}${suffix}; ${L.nand}: ${formatTempCelsius(sensorList[1], unit)}${suffix}`;
     } else if (sensorList.length > 0) {
-        const parts = sensorList.map((t, i) => `${L.sensor} ${i + 1}: ${formatTempCelsius(t)}\u00b0C`);
+        const parts = sensorList.map((t, i) => `${L.sensor} ${i + 1}: ${formatTempCelsius(t, unit)}${suffix}`);
         detail = parts.join('; ');
     }
 
@@ -68,14 +80,16 @@ export function formatTemperatureLine(manufacturer, composite, sensors, labels) 
 // empty when none. The caller computes the icon/style from `temp`.
 //
 // `labels` (optional): { sensor } translated label.
-export function formatSensorRows(manufacturer, sensors, labels) {
+// `unit` (optional): 'celsius' or 'fahrenheit' (see tempUnit.js).
+export function formatSensorRows(manufacturer, sensors, labels, unit) {
     const sensorList = sensors || [];
     if (manufacturer === 'Samsung' || sensorList.length === 0) {
         return [];
     }
     const L = resolveLabels(labels);
+    const suffix = tempSuffix(unit);
     return sensorList.map((t, i) => ({
-        text: `  ${L.sensor} ${i + 1}: ${formatTempCelsius(t)}\u00b0C`,
+        text: `${L.sensor} ${i + 1}: ${formatTempCelsius(t, unit)}${suffix}`,
         temp: t,
     }));
 }

@@ -150,8 +150,8 @@ cat > "$POLICY_DIR/$POLICY_FILE" <<EOF
 <policyconfig>
 
   <action id="$ACTION_ID">
-    <description>Read NVMe SMART health logs (JSON)</description>
-    <message>Authentication is required to read NVMe SMART information</message>
+    <description>NVMe Monitor: read NVMe SMART health data</description>
+    <message>Authentication is required to run the NVMe Monitor SMART helper and read your drive's health information</message>
 
     <defaults>
       <allow_any>no</allow_any>
@@ -266,8 +266,8 @@ cat > "$POLICY_DIR/$UNINSTALL_POLICY_FILE" <<EOF
 <policyconfig>
 
   <action id="$UNINSTALL_ACTION_ID">
-    <description>Uninstall the NVMe SMART polkit stack</description>
-    <message>Authentication is required to uninstall the NVMe SMART monitoring components</message>
+    <description>NVMe Monitor: uninstall the SMART monitoring components</description>
+    <message>Authentication is required to remove the NVMe Monitor SMART helper (wrapper script, polkit action and rules)</message>
 
     <defaults>
       <allow_any>no</allow_any>

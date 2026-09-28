@@ -24,9 +24,33 @@ msgstr "Avertissement de compatibilité nvme-cli"
 msgid "NVMe Monitor"
 msgstr "NVMe Monitor"
 
+#: prefs.js:19
+msgid "General"
+msgstr "Général"
+
+#: prefs.js:25
+msgid "Temperature"
+msgstr "Température"
+
+#: prefs.js:26
+msgid "Unit used to display drive temperatures"
+msgstr "Unité utilisée pour afficher les températures des disques"
+
+#: prefs.js:65
+msgid "Credits"
+msgstr "Crédits"
+
+#: prefs.js:70
+msgid "Assisted by"
+msgstr "Assisté par"
+
 #: extension.js:233
 msgid "Enable NVMe smart-log access"
 msgstr "Activer l'accès aux smart-logs NVMe"
+
+#: extension.js:404
+msgid "Preferences"
+msgstr "Préférences"
 
 #: extension.js:369
 msgid "nvme-cli not installed"
@@ -67,6 +91,14 @@ msgstr "  SMART : erreur d'analyse"
 #: extension.js:447
 msgid "  SMART: unavailable"
 msgstr "  SMART : indisponible"
+
+#: extension.js:662
+msgid "  SMART: log out and back in to enable access"
+msgstr "  SMART : déconnectez-vous puis reconnectez-vous pour activer l'acc\u00e8s"
+
+#: extension.js:671
+msgid "  Stale data"
+msgstr "  Données obsolètes"
 
 #: extension.js:450
 msgid "  Install NVMe Stack for SMART data"
@@ -132,9 +164,9 @@ msgstr "Pile polkit NVMe installée !"
 msgid "Please log out and back in for new group membership."
 msgstr "Veuillez vous déconnecter puis reconnecter pour la nouvelle appartenance au groupe."
 
-#: extension.js:1019
-msgid "Installation failed (exit code "
-msgstr "Échec de l'installation (code de sortie "
+#: extension.js:1882
+msgid "Installation failed"
+msgstr "Échec de l'installation"
 
 #: extension.js:1056
 msgid "Uninstall script not found."
@@ -144,9 +176,9 @@ msgstr "Script de désinstallation introuvable."
 msgid "NVMe polkit stack uninstalled."
 msgstr "Pile polkit NVMe désinstallée."
 
-#: extension.js:1079
-msgid "Uninstall failed (exit code "
-msgstr "Échec de la désinstallation (code de sortie "
+#: extension.js:1946
+msgid "Uninstall failed"
+msgstr "Échec de la désinstallation"
 
 msgid "Device"
 msgstr "Périphérique"
@@ -175,8 +207,16 @@ msgstr "total"
 msgid "Disk usage"
 msgstr "Utilisation du disque"
 
+#: extension.js:1217
+msgid "Click to know more"
+msgstr "Cliquez pour en savoir plus"
+
 msgid "Logical volumes"
 msgstr "Volumes logiques"
+
+#: extension.js:1173
+msgid "Contains"
+msgstr "Contient"
 
 msgid "LVM physical volume"
 msgstr "Volume physique LVM"

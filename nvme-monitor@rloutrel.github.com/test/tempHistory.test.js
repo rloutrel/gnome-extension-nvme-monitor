@@ -138,24 +138,24 @@ test('pruneStale drops old readings across all devices and empties devices', () 
     assert.deepEqual(h.devices(), ['/dev/nvme0n1']);
 });
 
-test('default window is 10 minutes (600s)', () => {
-    assert.equal(TEMP_HISTORY_WINDOW_MS, 600_000);
+test('default window is 30 minutes (1800s)', () => {
+    assert.equal(TEMP_HISTORY_WINDOW_MS, 1_800_000);
     const h = new TempHistory();
     h.add('/dev/nvme0n1', { t: 0, c: 40, s: [] });
-    h.add('/dev/nvme0n1', { t: 599_999, c: 41, s: [] });
+    h.add('/dev/nvme0n1', { t: 1_799_999, c: 41, s: [] });
     assert.equal(h.get('/dev/nvme0n1').length, 2);
-    h.add('/dev/nvme0n1', { t: 600_001, c: 42, s: [] });
+    h.add('/dev/nvme0n1', { t: 1_800_001, c: 42, s: [] });
     assert.equal(h.get('/dev/nvme0n1').length, 2);
 });
 
-test('invalid windowMs falls back to the 10-minute default', () => {
+test('invalid windowMs falls back to the 30-minute default', () => {
     const h = new TempHistory({ windowMs: -5 });
     h.add('/dev/nvme0n1', { t: 0, c: 40, s: [] });
-    h.add('/dev/nvme0n1', { t: 600_001, c: 42, s: [] });
-    // Effective window is 600s (not -5), so t=0 (cutoff = 600001-600000 = 1)
-    // is pruned while t=600001 survives — proving the fallback to the default.
+    h.add('/dev/nvme0n1', { t: 1_800_001, c: 42, s: [] });
+    // Effective window is 1800s (not -5), so t=0 (cutoff = 1800001-1800000 = 1)
+    // is pruned while t=1800001 survives — proving the fallback to the default.
     assert.equal(h.get('/dev/nvme0n1').length, 1);
-    assert.deepEqual(h.get('/dev/nvme0n1'), [{ t: 600_001, c: 42, s: [] }]);
+    assert.deepEqual(h.get('/dev/nvme0n1'), [{ t: 1_800_001, c: 42, s: [] }]);
 });
 
 // ---------------------------------------------------------------------------
