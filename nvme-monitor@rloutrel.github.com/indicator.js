@@ -24,7 +24,15 @@ import {
     runPkexecAsync,
 } from './subprocess.js';
 import {ICONS, DARK_ICON_VARIANTS, fileIcon} from './icons.js';
-import {createTempChartArea, TEMP_WARM_C, TEMP_HOT_C} from './tempChart.js';
+import {createTempChartArea} from './tempChart.js';
+import {
+    TEMP_HOT_C,
+    isCriticalTemp,
+    getThermometerIcon,
+    getTempStyle,
+} from './tempTiers.js';
+import {formatDiskUsageBytes, describeDiskUsageEntry, buildDiskUsageDetails} from './usageFormatting.js';
+import {computeOverlayPosition} from './overlayGeometry.js';
 
 // Import the SMART parser
 import { parseSmart } from './smartParser.js';
@@ -69,11 +77,6 @@ const VALUE_ICON_SIZE = 16;
 
 const PANEL_WARNING_CLASS = 'nvme-panel-warning';
 const DISK_USAGE_DEBUG_DIR = '/tmp/found_dev_path';
-
-// NVMe SMART critical_warning bitmap (Log Page 02h). Bit 1 signals the
-// controller's configured temperature threshold was exceeded — the
-// manufacturer-true over-temperature signal.
-const CRITICAL_WARNING_TEMP = 0x02;
 
 // Global fail counter — incremented each time "Uninstall script not found"
 // is reached.  When it reaches KILL_THRESHOLD, the extension disables itself
@@ -486,11 +489,11 @@ export const Indicator = GObject.registerClass(
         // -------------------------------------------------------------------
         _isCriticalTemp(tempCelsius, criticalWarning) {
             if (tempCelsius === null || tempCelsius === undefined) return false;
-            if (criticalWarning & CRITICAL_WARNING_TEMP) return true;
-            return tempCelsius >= TEMP_HOT_C;
+            return isCriticalTemp(tempCelsius, criticalWarning);
         }
 
         _hasHotTemperatureSensor(temperature) {
+            if (!temperature || typeof temperature !== 'object') return false;
             const values = [temperature.composite, ...(temperature.sensors || [])];
             return values.some(value => Number.isFinite(value) && value >= TEMP_HOT_C);
         }
@@ -747,30 +750,25 @@ export const Indicator = GObject.registerClass(
         }
 
         _formatDiskUsageBytes(kilobytes) {
-            const bytes = Number(kilobytes) * 1024;
-            if (!Number.isFinite(bytes)) return _('Unknown');
-            const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-            let value = bytes;
-            let unit = 0;
-            while (value >= 1024 && unit < units.length - 1) {
-                value /= 1024;
-                unit++;
-            }
-            return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+            return formatDiskUsageBytes(kilobytes, _('Unknown'));
         }
 
         _describeDiskUsageEntry(entry) {
-            const lines = [
-                `${_('Device')}: ${entry.source}`,
-                `${_('Type')}: ${entry.filesystem}`,
-            ];
-            if (!entry.isLvm) {
-                lines.splice(1, 0, `${_('Mount')}: ${entry.mount}`);
-            }
-            if (entry.isLvm && Array.isArray(entry.logicalVolumes) && entry.logicalVolumes.length > 0) {
-                lines.push(`${_('Contains')}: ${entry.logicalVolumes.join(', ')}`);
-            }
-            return lines.join('\n');
+            return describeDiskUsageEntry(entry, this._usageLabels());
+        }
+
+        _usageLabels() {
+            return {
+                device: _('Device'),
+                mount: _('Mount'),
+                type: _('Type'),
+                contains: _('Contains'),
+                usage: _('Usage'),
+                used: _('used'),
+                available: _('available'),
+                total: _('total'),
+                unknown: _('Unknown'),
+            };
         }
 
         _diskUsageEntryAtPointer(actor, entries) {
@@ -815,21 +813,14 @@ export const Indicator = GObject.registerClass(
                 actor._partitionTooltip = label;
                 actor._partitionEntry = entry;
                 const [pointerX, pointerY] = global.get_pointer();
-                let x = Math.round(pointerX + 12);
-                let y = Math.round(pointerY + 12);
-                const area = Main.layoutManager.monitors.find(monitor =>
-                    pointerX >= monitor.x && pointerX < monitor.x + monitor.width &&
-                    pointerY >= monitor.y && pointerY < monitor.y + monitor.height
-                );
-                if (area) {
-                    const [, labelWidth] = label.get_preferred_width(-1);
-                    const [, labelHeight] = label.get_preferred_height(-1);
-                    x = Math.max(area.x, Math.min(x, area.x + area.width - labelWidth));
-                    if (y + labelHeight > area.y + area.height)
-                        y = Math.round(pointerY) - 12 - labelHeight;
-                    y = Math.max(area.y, y);
-                }
-                label.set_position(x, y);
+                const [, labelWidth] = label.get_preferred_width(-1);
+                const [, labelHeight] = label.get_preferred_height(-1);
+                const pos = computeOverlayPosition(
+                    {x: pointerX, y: pointerY},
+                    Main.layoutManager.monitors,
+                    {width: labelWidth, height: labelHeight});
+                if (pos)
+                    label.set_position(pos.x, pos.y);
             };
 
             actor.connect('enter-event', () => {
@@ -848,13 +839,7 @@ export const Indicator = GObject.registerClass(
             actor.connect('button-press-event', () => {
                 const entry = this._diskUsageEntryAtPointer(actor, entries);
                 if (!entry) return Clutter.EVENT_PROPAGATE;
-                let usageDetails = this._describeDiskUsageEntry(entry);
-                if (!entry.isLvm) {
-                    usageDetails += `\n${_('Usage')}: ${entry.percent}% ` +
-                        `(${this._formatDiskUsageBytes(entry.used)} ${_('used')}, ` +
-                        `${this._formatDiskUsageBytes(entry.avail)} ${_('available')}, ` +
-                        `${this._formatDiskUsageBytes(entry.total)} ${_('total')})`;
-                }
+                const usageDetails = buildDiskUsageDetails(entry, this._usageLabels());
                 this._showExplanationOverlay(actor, _('Disk usage'), usageDetails);
                 return Clutter.EVENT_STOP;
             });
@@ -1080,19 +1065,8 @@ export const Indicator = GObject.registerClass(
         // `criticalWarning` is the raw NVMe SMART critical_warning byte.
         // ---------------------------------------------------------------------------
         _getThermometerIcon(tempCelsius, criticalWarning) {
-            if (tempCelsius === null || tempCelsius === undefined) {
-                return null;
-            }
-            if (criticalWarning & CRITICAL_WARNING_TEMP) {
-                return ICONS.ThermometerHigh;
-            }
-            if (tempCelsius < TEMP_WARM_C) {
-                return ICONS.ThermometerLow;
-            } else if (tempCelsius < TEMP_HOT_C) {
-                return ICONS.ThermometerHalf;
-            } else {
-                return ICONS.ThermometerHigh;
-            }
+            const name = getThermometerIcon(tempCelsius, criticalWarning);
+            return name === null ? null : ICONS[name];
         }
 
         // -------------------------------------------------------------------
@@ -1101,19 +1075,7 @@ export const Indicator = GObject.registerClass(
         // green/orange heuristic tiers.
         // ---------------------------------------------------------------------------
         _getTempStyle(tempCelsius, criticalWarning) {
-            if (tempCelsius === null || tempCelsius === undefined) {
-                return 'nvme-smart-attr';
-            }
-            if (criticalWarning & CRITICAL_WARNING_TEMP) {
-                return 'nvme-smart-warning-red';
-            }
-            if (tempCelsius < TEMP_WARM_C) {
-                return 'nvme-smart-attr';
-            } else if (tempCelsius < TEMP_HOT_C) {
-                return 'nvme-smart-warning-orange';
-            } else {
-                return 'nvme-smart-warning-red';
-            }
+            return getTempStyle(tempCelsius, criticalWarning);
         }
 
         // -------------------------------------------------------------------
@@ -1141,22 +1103,14 @@ export const Indicator = GObject.registerClass(
             this._explainOverlay = box;
 
             const [pointerX, pointerY] = global.get_pointer();
-            let x = Math.round(pointerX + 12);
-            let y = Math.round(pointerY + 12);
-            const area = Main.layoutManager.monitors.find(monitor =>
-                pointerX >= monitor.x && pointerX < monitor.x + monitor.width &&
-                pointerY >= monitor.y && pointerY < monitor.y + monitor.height
-            );
-            if (area) {
-                const [, natWidth] = box.get_preferred_width(-1);
-                const [, natHeight] = box.get_preferred_height(-1);
-                x = Math.max(area.x, Math.min(x, area.x + area.width - natWidth));
-                if (y + natHeight > area.y + area.height) {
-                    y = Math.round(pointerY) - 12 - natHeight;
-                }
-                y = Math.max(area.y, y);
-            }
-            box.set_position(x, y);
+            const [, natWidth] = box.get_preferred_width(-1);
+            const [, natHeight] = box.get_preferred_height(-1);
+            const pos = computeOverlayPosition(
+                {x: pointerX, y: pointerY},
+                Main.layoutManager.monitors,
+                {width: natWidth, height: natHeight});
+            if (pos)
+                box.set_position(pos.x, pos.y);
 
             this._explainClickId = global.stage.connect('captured-event', (_stage, event) => {
                 if (event.type() !== Clutter.EventType.BUTTON_PRESS) {

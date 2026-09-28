@@ -50,7 +50,9 @@ nvme-monitor@rloutrel.github.com/
 ### Pure vs GJS modules
 
 A hard rule: **`smartParser.js`, `tempFormat.js`, `versionUtils.js`,
-`deviceList.js`, and `tempHistory.js` are pure modules with zero GJS/GObject
+`deviceList.js`, `tempHistory.js`, `tempUnit.js`, `polkitManager.js`,
+`tempTiers.js`, `usageFormatting.js`, and `overlayGeometry.js` are pure
+modules with zero GJS/GObject
 imports.** They run under plain Node and are unit-tested there. Do **not** add `gi://` or
 `resource:///` imports to these files. Anything that touches `Gio`, `GLib`,
 `St`, `Clutter`, `Main`, or GObject belongs in a GJS-only module
