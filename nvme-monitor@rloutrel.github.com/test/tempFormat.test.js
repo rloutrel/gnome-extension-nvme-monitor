@@ -86,9 +86,9 @@ test('missing sensor values render as ? placeholder', () => {
 test('non-Samsung with sensors produces one row per sensor', () => {
     const rows = formatSensorRows('WD', [41, 45, 48]);
     assert.deepStrictEqual(rows, [
-        { text: '  Sensor 1: 41,0°C', temp: 41 },
-        { text: '  Sensor 2: 45,0°C', temp: 45 },
-        { text: '  Sensor 3: 48,0°C', temp: 48 },
+        { text: 'Sensor 1: 41,0°C', temp: 41 },
+        { text: 'Sensor 2: 45,0°C', temp: 45 },
+        { text: 'Sensor 3: 48,0°C', temp: 48 },
     ]);
 });
 
@@ -121,8 +121,8 @@ test('translated sensor label is used in generic detail', () => {
 test('translated labels are used in sensor rows', () => {
     const rows = formatSensorRows('WD', [41, 45], { sensor: 'Capteur' });
     assert.deepStrictEqual(rows, [
-        { text: '  Capteur 1: 41,0°C', temp: 41 },
-        { text: '  Capteur 2: 45,0°C', temp: 45 },
+        { text: 'Capteur 1: 41,0°C', temp: 41 },
+        { text: 'Capteur 2: 45,0°C', temp: 45 },
     ]);
 });
 
@@ -138,5 +138,5 @@ test('empty labels object falls back to English defaults', () => {
 
 test('sensor rows preserve null temp for placeholder text', () => {
     const rows = formatSensorRows('WD', [null]);
-    assert.deepStrictEqual(rows, [{ text: '  Sensor 1: ?°C', temp: null }]);
+    assert.deepStrictEqual(rows, [{ text: 'Sensor 1: ?°C', temp: null }]);
 });

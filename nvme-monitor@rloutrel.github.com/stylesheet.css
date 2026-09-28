@@ -169,3 +169,14 @@
     margin-top: 4px;
     margin-bottom: 4px;
 }
+/* Gear button opening the preferences window, right of the smart-log
+   toggle. Padding keeps the click target comfortable without pushing
+   the switch off the row. */
+.nvme-prefs-button {
+    padding: 4px;
+}
+
+.nvme-prefs-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}

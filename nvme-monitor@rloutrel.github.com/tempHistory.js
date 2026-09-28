@@ -1,5 +1,5 @@
 /**
- * Rolling per-device temperature history (last 10 minutes).
+ * Rolling per-device temperature history (last 30 minutes).
  *
  * Pure module: no GJS/GObject imports, so it can be unit-tested with Node.
  *
@@ -7,15 +7,15 @@
  * here, keyed by device path. Each reading is a compact object:
  *   { t: number (ms epoch), c: number|null (composite °C), s: number[] (sensors °C) }
  *
- * Entries older than the rolling window (default 10 minutes) are pruned on
+ * Entries older than the rolling window (default 30 minutes) are pruned on
  * insert and on load, so the structure always represents roughly "the last
- * 10 minutes".
+ * 30 minutes".
  *
  * Persistence is delegated to the caller: serialize() returns a JSON string
  * the caller writes to /tmp, and deserialize() rebuilds from that string.
  */
 
-const DEFAULT_WINDOW_MS = 600_000;
+const DEFAULT_WINDOW_MS = 1_800_000;
 
 /**
  * Per-device rolling temperature history.

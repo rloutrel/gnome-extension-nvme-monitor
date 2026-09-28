@@ -26,8 +26,20 @@ import {
 } from './versionUtils.js';
 // Import device-list normalization for both flat and nested JSON layouts (pure)
 import { normalizeDeviceList } from './deviceList.js';
+// Import temperature unit handling (pure, unit-tested).
+import { TEMP_UNIT_CELSIUS, detectTemperatureUnit } from './tempUnit.js';
 // Import rolling per-device temperature history (pure, unit-tested).
 import { TempHistory, TEMP_HISTORY_WINDOW_MS, computeTimeAboveThresholds, crossedThresholds } from './tempHistory.js';
+// Import polkit management (pure, unit-tested)
+import {
+    WRAPPER_PATH,
+    UNINSTALL_PATH,
+    SETUP_SCRIPT_NAME,
+    isV2Installed,
+    isUninstallAvailable,
+    isCurrentUserInSmartGroup,
+    runPkexecSync,
+} from './polkitManager.js';
 
 // ---------------------------------------------------------------------------
 // Unified logger + simple loop detector.
@@ -69,15 +81,7 @@ function notifyError(title, body = '') {
     Main.notify(title, body);
 }
 
-// ---------------------------------------------------------------------------
-// v2: New polkit stack paths (installed by setup-polkit.sh)
-// ---------------------------------------------------------------------------
-const WRAPPER_PATH = '/usr/local/bin/nvme-smart-log-json';
-const UNINSTALL_PATH = '/usr/local/bin/nvme-smart-uninstall.sh';
-const SETUP_SCRIPT_NAME = 'setup-polkit.sh';
-const SMART_GROUP_NAME = 'nvme-smart';
-
-// Persisted rolling temperature history (last 10 minutes, per device). The file
+// Persisted rolling temperature history (last 30 minutes, per device). The file
 // is written atomically by GLib.file_set_contents after each capture so a
 // crash/restart keeps the recent curve, and it is pruned on load.
 const TEMP_HISTORY_PATH = '/tmp/nvme-monitor-temp-history.json';
@@ -141,6 +145,8 @@ const ICONS = Object.freeze({
     EyeglassesDark: 'eyeglasses-dark',
     VectorPen: 'vector-pen',
     VectorPenDark: 'vector-pen-dark',
+    Gear: 'gear',
+    GearDark: 'gear-dark',
     PanelFallback: 'drive-harddisk-symbolic',
 });
 
@@ -157,6 +163,7 @@ const DARK_ICON_VARIANTS = Object.freeze({
     [ICONS.ArrowLeftRight]: ICONS.ArrowLeftRightDark,
     [ICONS.Eyeglasses]: ICONS.EyeglassesDark,
     [ICONS.VectorPen]: ICONS.VectorPenDark,
+    [ICONS.Gear]: ICONS.GearDark,
 });
 
 // Build a Gio.FileIcon from an absolute path, or null if the file is missing.
@@ -197,24 +204,10 @@ function _checkNvmeCliVersion(nvmeBin) {
     }
 }
 
-function isV2Installed() {
-    return GLib.file_test(WRAPPER_PATH, GLib.FileTest.EXISTS);
-}
-
-function isCurrentUserInSmartGroup() {
-    const user = GLib.get_user_name();
-    const result = runCommandSync(['id', '-nG', user]);
-    if (!result.ok || result.exitCode !== 0) return false;
-    return result.stdout.trim().split(/\s+/).includes(SMART_GROUP_NAME);
-}
-
-function isUninstallAvailable() {
-    return GLib.file_test(UNINSTALL_PATH, GLib.FileTest.EXISTS);
-}
-
 // ---------------------------------------------------------------------------
 // Run a command synchronously (no pkexec).
 // Returns { ok, exitCode, stdout, stderr }.
+// GJS-specific implementation used by polkitManager and other modules.
 // ---------------------------------------------------------------------------
 function runCommandSync(argv) {
     try {
@@ -239,15 +232,90 @@ function runCommandSync(argv) {
 }
 
 // ---------------------------------------------------------------------------
-// Run a command via pkexec synchronously.
-// Returns { ok, exitCode, stdout, stderr }.
+// GJS-specific file existence check for polkitManager.
 // ---------------------------------------------------------------------------
-function runPkexecSync(argv) {
+function fileExists(path) {
+    return GLib.file_test(path, GLib.FileTest.EXISTS);
+}
+
+// ---------------------------------------------------------------------------
+// GJS-specific wrapper for polkitManager functions.
+// These wrap the pure functions with GJS implementations.
+// ---------------------------------------------------------------------------
+function checkV2Installed() {
+    return isV2Installed(fileExists);
+}
+
+function checkCurrentUserInSmartGroup() {
+    return isCurrentUserInSmartGroup(runCommandSync, GLib.get_user_name);
+}
+
+function checkUninstallAvailable() {
+    return isUninstallAvailable(fileExists);
+}
+
+function runPkexec(argv) {
+    // The no-password polkit rule only matches nvme-smart group members with
+    // an active local session. Without membership pkexec falls back to
+    // auth_admin: the GNOME Shell polkit agent runs on the same main loop this
+    // synchronous call blocks, so a prompt here deadlocks the session.
+    if (!checkCurrentUserInSmartGroup()) {
+        return {
+            ok: false,
+            exitCode: -1,
+            stdout: '',
+            stderr: 'nvme-smart group membership is not active in this session',
+        };
+    }
+
+    return runPkexecSync(runCommandSync, GLib.find_program_in_path, argv);
+}
+
+// ---------------------------------------------------------------------------
+// Run a command asynchronously. Resolves with
+// { ok, exitCode, stdout, stderr }, rejects if the process cannot spawn.
+// The main loop keeps running while waiting, so polkit authentication
+// prompts (shown by the GNOME Shell agent) remain possible.
+// ---------------------------------------------------------------------------
+function runCommandAsync(argv) {
+    return new Promise((resolve, reject) => {
+        let proc;
+        try {
+            proc = new Gio.Subprocess({
+                argv: argv,
+                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+            });
+            proc.init(null);
+        } catch (e) {
+            reject(e);
+            return;
+        }
+        proc.communicate_utf8_async(null, null, (p, res) => {
+            try {
+                const result = p.communicate_utf8_finish(res);
+                resolve({
+                    ok: true,
+                    exitCode: p.get_exit_status(),
+                    stdout: result[1] || '',
+                    stderr: result[2] || '',
+                });
+            } catch (e) {
+                reject(e);
+            }
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Run a command via pkexec asynchronously.
+// Resolves with { ok, exitCode, stdout, stderr }, rejects on spawn failure.
+// ---------------------------------------------------------------------------
+function runPkexecAsync(argv) {
     const pkexecPath = GLib.find_program_in_path('pkexec');
     if (!pkexecPath) {
-        return { ok: false, exitCode: -1, stdout: '', stderr: 'pkexec not found' };
+        return Promise.reject(new Error('pkexec not found'));
     }
-    return runCommandSync([pkexecPath, ...argv]);
+    return runCommandAsync([pkexecPath, ...argv]);
 }
 
 // ---------------------------------------------------------------------------
@@ -276,9 +344,11 @@ const Indicator = GObject.registerClass(
             // be shown separately from the disk-usage gauge.
             this._lastSmartReadAt = {};
 
-            // Rolling per-device temperature history (last 10 minutes). Loaded
+            // Rolling per-device temperature history (last 30 minutes). Loaded
             // from /tmp in enable() so a restart keeps the recent curve.
             this._tempHistory = new TempHistory({ windowMs: TEMP_HISTORY_WINDOW_MS });
+            // Display temperature unit, set by the extension from GSettings.
+            this._tempUnit = TEMP_UNIT_CELSIUS;
             // Per-device fast (500ms) timers for drives in the critical/hot
             // (red) tier. Only the matching device's SMART is re-fetched.
             this._criticalTimers = {};
@@ -293,7 +363,7 @@ const Indicator = GObject.registerClass(
             // ---------------------------------------------------------------
             // v2: NVMe smart-log access toggle (install/uninstall polkit stack)
             // ---------------------------------------------------------------
-            const v2Installed = isV2Installed();
+            const v2Installed = checkV2Installed();
             _debug(`init: isV2Installed=${v2Installed}`);
 
             this._v2Updating = false;
@@ -315,6 +385,27 @@ const Indicator = GObject.registerClass(
                     this._uninstallV2Stack();
                 }
             });
+            // Gear button at the right of the toggle row: opens the
+            // extension preferences window (temperature unit, ...).
+            const gearIcon = this._loadMenuIconByName(ICONS.Gear);
+            this._prefsButton = new St.Button({
+                child: new St.Icon({
+                    gicon: gearIcon,
+                    icon_name: gearIcon ? null : 'emblem-system-symbolic',
+                    icon_size: SECTION_ICON_SIZE,
+                }),
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+                style_class: 'nvme-prefs-button',
+            });
+            this._prefsButton.set_accessible_name(_('Preferences'));
+            this._prefsButton.connect('clicked', () => {
+                if (this._openPreferences)
+                    this._openPreferences();
+            });
+            this._v2Toggle.add_child(this._prefsButton);
+
             this.menu.addMenuItem(this._v2Toggle);
 
             this.menu.addMenuItem(new PopupSeparatorMenuItem());
@@ -413,9 +504,9 @@ const Indicator = GObject.registerClass(
         // and script is missing. Called from enable() after path is set.
         // -------------------------------------------------------------------
         _checkSetupScript() {
-            if (isV2Installed()) return;
+            if (checkV2Installed()) return;
             const setupPath = GLib.build_filenamev([this._extensionPath || '', SETUP_SCRIPT_NAME]);
-            if (!GLib.file_test(setupPath, GLib.FileTest.EXISTS)) {
+            if (!fileExists(setupPath)) {
                 _warn('setup-polkit.sh missing — disabling toggle');
                 this._v2Toggle.setSensitive(false);
             }
@@ -461,7 +552,7 @@ const Indicator = GObject.registerClass(
         // Called on menu open and by the polling timer (every 5 seconds
         // when the polkit stack is installed). On each successful SMART read
         // the composite temperature is recorded into the rolling history and
-        // rendered as a 10-minute line graph; devices in the red tier get a
+        // rendered as a 30-minute line graph; devices in the red tier get a
         // dedicated 500ms refresh (see _syncCriticalTimers).
         // -------------------------------------------------------------------
         _refreshDevices() {
@@ -491,7 +582,7 @@ const Indicator = GObject.registerClass(
                 return;
             }
 
-            const v2Installed = isV2Installed();
+            const v2Installed = checkV2Installed();
             const now = Date.now();
             const criticalPaths = [];
             const lvmInfo = collectLvmInfo(
@@ -525,7 +616,7 @@ const Indicator = GObject.registerClass(
         // -------------------------------------------------------------------
         // Render a single device (header, meta, SMART info) into the device
         // section. On a successful SMART read the composite temperature is
-        // recorded into the rolling history and a 10-minute line graph is
+        // recorded into the rolling history and a 30-minute line graph is
         // added. Returns true when the device is in the red (critical/hot)
         // tier and should get a 500ms fast refresh.
         // -------------------------------------------------------------------
@@ -535,12 +626,14 @@ const Indicator = GObject.registerClass(
             let smartObj = null;
             let smartParseError = false;
             if (v2Installed) {
-                const smartResult = runPkexecSync([WRAPPER_PATH, dev.DevicePath]);
-                if (smartResult.ok && smartResult.exitCode === 0) {
-                    try {
-                        smartObj = JSON.parse(smartResult.stdout);
-                    } catch {
-                        smartParseError = true;
+                if (checkCurrentUserInSmartGroup()) {
+                    const smartResult = runPkexec([WRAPPER_PATH, dev.DevicePath]);
+                    if (smartResult.ok && smartResult.exitCode === 0) {
+                        try {
+                            smartObj = JSON.parse(smartResult.stdout);
+                        } catch {
+                            smartParseError = true;
+                        }
                     }
                 }
             }
@@ -591,6 +684,8 @@ const Indicator = GObject.registerClass(
                     this._addInfoLine(_('  SMART: parse error'));
                 } else if (smartObj) {
                     this._addSmartInfo(smartObj, dev.ModelNumber);
+                } else if (!checkCurrentUserInSmartGroup()) {
+                    this._addInfoLine(_('  SMART: log out and back in to enable access'), 'nvme-smart-info');
                 } else {
                     this._addInfoLine(_('  SMART: unavailable'), 'nvme-smart-info');
                 }
@@ -603,7 +698,7 @@ const Indicator = GObject.registerClass(
             }
 
             // Record the temperature reading into the rolling history and
-            // render the 10-minute line graph. The red tier (drive's
+            // render the 30-minute line graph. The red tier (drive's
             // critical_warning bit 1, or composite >= TEMP_HOT_C) drives a
             // dedicated 500ms refresh for this device.
             if (parsedSmart && parsedSmart.temperature.composite !== null) {
@@ -700,13 +795,14 @@ const Indicator = GObject.registerClass(
         // (e.g. the menu was closed/reopened).
         // -------------------------------------------------------------------
         _refreshCriticalDevice(devicePath) {
-            if (!isV2Installed()) return;
+            if (!checkV2Installed()) return;
+            if (!checkCurrentUserInSmartGroup()) return;
             const devices = this._fetchAndCacheDevices();
             if (!devices) return;
             const dev = devices.find(d => d.DevicePath === devicePath);
             if (!dev) return;
 
-            const smartResult = runPkexecSync([WRAPPER_PATH, devicePath]);
+            const smartResult = runPkexec([WRAPPER_PATH, devicePath]);
             if (!smartResult.ok || smartResult.exitCode !== 0) return;
             let smartObj;
             try {
@@ -741,7 +837,7 @@ const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
-        // Add a non-interactive last-10-minutes temperature line graph for a
+        // Add a non-interactive last-30-minutes temperature line graph for a
         // device, drawn with St.DrawingArea / Cairo. The graph is colored by
         // the temperature tier (mirrors the thermometer icon); the min and max
         // temperature over the window are annotated on the left axis. The
@@ -756,8 +852,8 @@ const Indicator = GObject.registerClass(
             const latestTemp = latestReading ? latestReading.c : null;
             const color = tempTierColor(latestTemp, criticalWarning);
 
-            const width = 320;
-            const height = 64;
+            const width = 480;
+            const height = 96;
             const area = new St.DrawingArea({
                 width,
                 height,
@@ -783,7 +879,7 @@ const Indicator = GObject.registerClass(
 
         // -------------------------------------------------------------------
         // Cairo draw callback for the temperature line graph. Plots the
-        // composite temperature of the last 10 minutes, left = oldest, right
+        // composite temperature of the last 30 minutes, left = oldest, right
         // = newest, with an auto-scaled y range, a baseline grid, faint
         // warm/hot threshold guides, and the min/max temperature values
         // annotated on the left axis at their level with markers on the line.
@@ -805,7 +901,11 @@ const Indicator = GObject.registerClass(
             const plotW = Math.max(1, w - padLeft - padRight);
             const plotH = Math.max(1, h - padTop - padBottom);
 
-            // Background grid baseline.
+            // Black background across the whole plot area.
+            cr.setSourceRGB(0.0, 0.0, 0.0);
+            cr.rectangle(padLeft, padTop, plotW, plotH);
+            cr.fill();
+            // Bottom baseline.
             cr.setSourceRGB(COLOR_TRACK[0], COLOR_TRACK[1], COLOR_TRACK[2]);
             cr.setLineWidth(1);
             cr.moveTo(padLeft, padTop + plotH);
@@ -822,18 +922,18 @@ const Indicator = GObject.registerClass(
 
             let minT = Math.min(...temps);
             let maxT = Math.max(...temps);
-            // Track the actual data min/max before padding, for the labels.
+            // Track the actual data min/max before rounding, for the labels
+            // (the axis shows the true max obtained, not the rounded bound).
             const dataMin = minT;
             const dataMax = maxT;
-            // Pad the y range a little so a flat line is not on the edge.
-            if (maxT === minT) {
-                minT -= 1;
-                maxT += 1;
-            } else {
-                const span = maxT - minT;
-                minT -= span * 0.1;
-                maxT += span * 0.1;
-            }
+            // Snap the y range to whole tens: the lower bound rounds down to
+            // the nearest ten and the upper bound rounds up, so the axis
+            // limits always read as round numbers and a flat line is never
+            // glued to an edge.
+            minT = Math.floor(minT / 10) * 10;
+            maxT = Math.ceil(maxT / 10) * 10;
+            if (maxT === minT)
+                maxT = minT + 10;
             const rangeT = maxT - minT;
 
             const newest = readings[readings.length - 1].t;
@@ -848,6 +948,34 @@ const Indicator = GObject.registerClass(
                 const frac = (temp - minT) / rangeT;
                 return padTop + (1 - frac) * plotH;
             };
+            // Horizontal gridlines at every whole 10 degrees inside the
+            // y range (the axis bounds are already rounded to tens).
+            cr.setSourceRGB(0.35, 0.35, 0.35);
+            cr.setLineWidth(0.5);
+            for (let tickT = minT + 10; tickT < maxT; tickT += 10) {
+                const y = yOf(tickT);
+                cr.moveTo(padLeft, y);
+                cr.lineTo(padLeft + plotW, y);
+                cr.stroke();
+            }
+            // Vertical time guides every 10 minutes, labeled relative to now
+            // (the right edge): -10m, -20m, -30m...
+            const GUIDE_STEP_MS = 600_000;
+            const TICK_LABEL_COLOR = [0.45, 0.45, 0.45];
+            cr.setFontSize(7);
+            for (let back = GUIDE_STEP_MS; back <= windowMs; back += GUIDE_STEP_MS) {
+                const guideT = newest - back;
+                const x = xOf(guideT);
+                if (x < padLeft || x > padLeft + plotW) continue;
+                cr.setSourceRGB(0.25, 0.25, 0.25);
+                cr.setLineWidth(0.5);
+                cr.moveTo(x, padTop);
+                cr.lineTo(x, padTop + plotH);
+                cr.stroke();
+                cr.setSourceRGB(TICK_LABEL_COLOR[0], TICK_LABEL_COLOR[1], TICK_LABEL_COLOR[2]);
+                cr.moveTo(x + 2, padTop + plotH - 2);
+                cr.showText(`-${back / 60000}m`);
+            }
 
             // Threshold tiers, from cool to hot, with their tier color. A
             // threshold guide is drawn only when it was crossed at least once
@@ -878,38 +1006,52 @@ const Indicator = GObject.registerClass(
             this._drawTempLine(cr, readings, color, xOf, yOf, dataMin, dataMax, cw);
 
             // Right-side time counters for each crossed threshold.
-            this._drawThresholdCounters(cr, thresholds, crossed, timeAbove, padLeft, plotW, padTop);
+            this._drawThresholdCounters(cr, thresholds, crossed, timeAbove, padLeft, plotW, padTop, yOf, plotH);
 
             cr.$dispose();
         }
 
         // -------------------------------------------------------------------
         // Draw the temperature line and the min/max markers + left-axis labels.
-        // The max marker is tinted by its own temperature tier
-        // (green/orange/red) so an over-threshold maximum stands out; the min
-        // marker stays in the line color. `cw` is the raw critical_warning byte
-        // used to resolve the max's tier color.
+        // The line is drawn segment by segment: each segment takes the tier
+        // color of its ending point, so only the portions whose arrival
+        // temperature crossed a threshold are tinted with that threshold's
+        // color; the rest keeps the base line color. The max marker is tinted
+        // by its own temperature tier (green/orange/red) so an over-threshold
+        // maximum stands out; the min marker stays in the line color. `cw` is
+        // the raw critical_warning byte used to resolve tiers.
         // -------------------------------------------------------------------
         _drawTempLine(cr, readings, color, xOf, yOf, dataMin, dataMax, cw) {
-            cr.setSourceRGB(color[0], color[1], color[2]);
             cr.setLineWidth(1.5);
             let started = false;
+            let lastX = null;
+            let lastY = null;
             let minPoint = null;
             let maxPoint = null;
             for (const r of readings) {
                 if (r.c === null || r.c === undefined || !Number.isFinite(r.c)) continue;
                 const x = xOf(r.t);
                 const y = yOf(r.c);
+                // Historical segments are tiered by their own temperature
+                // only; the current critical_warning byte must not tint the
+                // whole line red.
+                const segColor = tempTierColor(r.c, 0);
                 if (!started) {
-                    cr.moveTo(x, y);
+                    lastX = x;
+                    lastY = y;
                     started = true;
                 } else {
+                    cr.setSourceRGB(segColor[0], segColor[1], segColor[2]);
+                    cr.moveTo(lastX, lastY);
                     cr.lineTo(x, y);
+                    cr.stroke();
+                    lastX = x;
+                    lastY = y;
                 }
                 if (r.c === dataMin && (!minPoint || r.t >= minPoint.t)) minPoint = { x, y };
                 if (r.c === dataMax && (!maxPoint || r.t >= maxPoint.t)) maxPoint = { x, y };
             }
-            cr.stroke();
+
 
             const labelColor = [0.85, 0.85, 0.85];
             const MARKER_R = 2.5;
@@ -924,7 +1066,7 @@ const Indicator = GObject.registerClass(
                 cr.stroke();
                 cr.setFontSize(9);
                 cr.moveTo(2, pt.y + 3);
-                cr.showText(formatTempCelsius(value) + '\u00b0');
+                cr.showText(formatTempCelsius(value, this._tempUnit) + '\u00b0');
             };
             drawExtremum(minPoint, dataMin, color);
             drawExtremum(maxPoint, dataMax, tempTierColor(dataMax, cw));
@@ -935,20 +1077,25 @@ const Indicator = GObject.registerClass(
         // how long the temperature spent at/above it over the window, colored
         // by the threshold tier. Stacked top-down, right-aligned.
         // -------------------------------------------------------------------
-        _drawThresholdCounters(cr, thresholds, crossed, timeAbove, padLeft, plotW, padTop) {
+        _drawThresholdCounters(cr, thresholds, crossed, timeAbove, padLeft, plotW, padTop, yOf, plotH) {
             cr.setFontSize(8);
-            let row = 0;
             const orderedThresholds = [...thresholds].sort((left, right) => right.value - left.value);
+            let lastY = -Infinity;
             for (const th of orderedThresholds) {
                 if (!crossed.has(th.value)) continue;
                 const ms = timeAbove[th.value] || 0;
                 const text = formatDurationMs(ms);
                 cr.setSourceRGB(th.color[0], th.color[1], th.color[2]);
                 const x = padLeft + plotW + 4;
-                const y = padTop + 9 + row * 12;
+                // Align each counter with its threshold guide line, clamped
+                // inside the plot; nudge down when labels would overlap.
+                let y = yOf(th.value) + 3;
+                y = Math.max(padTop + 8, Math.min(padTop + plotH - 1, y));
+                if (y < lastY + 10)
+                    y = lastY + 10;
+                lastY = y;
                 cr.moveTo(x, y);
-                cr.showText(`${th.value}°: ${text}`);
-                row++;
+                cr.showText(`${formatTempCelsius(th.value, this._tempUnit)}°: ${text}`);
             }
         }
 
@@ -1140,7 +1287,7 @@ const Indicator = GObject.registerClass(
                 if (actor._partitionTooltip && actor._partitionEntry === entry) return;
                 if (actor._partitionTooltip) actor._partitionTooltip.destroy();
                 const label = new St.Label({
-                    text: '?',
+                    text: `${entry.source}\n${_('Click to know more')}`,
                     style_class: 'nvme-hover-tooltip',
                 });
                 Main.uiGroup.add_child(label);
@@ -1376,7 +1523,7 @@ const Indicator = GObject.registerClass(
                     box.add_child(this._createIcon(section.sectionIcon, SECTION_ICON_SIZE, 'nvme-metric-section-icon'));
                 }
 
-                const subBox = new St.BoxLayout({ x_expand: true, x_align: Clutter.ActorAlign.CENTER, style_class: 'nvme-metric-section' });
+                const subBox = new St.BoxLayout({ x_expand: true, x_align: Clutter.ActorAlign.START, style_class: 'nvme-metric-section' });
                 box.add_child(subBox);
 
                 for (let i = 0; i < section.items.length; i++) {
@@ -1389,7 +1536,7 @@ const Indicator = GObject.registerClass(
                     }
                     subBox.add_child(iconActor);
 
-                    const valueLabel = new St.Label({ text: seg.value, x_expand: true });
+                    const valueLabel = new St.Label({ text: seg.value, x_expand: false });
                     valueLabel.add_style_class_name(styleClass);
                     valueLabel.y_align = Clutter.ActorAlign.CENTER;
                     if (seg.tooltip) {
@@ -1679,12 +1826,13 @@ const Indicator = GObject.registerClass(
                     manuf,
                     smart.temperature.composite,
                     smart.temperature.sensors,
-                    tempLabels
+                    tempLabels,
+                    this._tempUnit
                 );
                 this._addInfoLine(line, style, icon);
 
                 // Additional sensors as separate rows (non-Samsung only).
-                for (const row of formatSensorRows(manuf, smart.temperature.sensors, tempLabels)) {
+                for (const row of formatSensorRows(manuf, smart.temperature.sensors, tempLabels, this._tempUnit)) {
                     const sensorIcon = this._getThermometerIcon(row.temp, cw);
                     const sensorStyle = this._getTempStyle(row.temp, cw);
                     this._addInfoLine(row.text, sensorStyle, sensorIcon);
@@ -1709,7 +1857,7 @@ const Indicator = GObject.registerClass(
                 powerParts.push(`${_('Unsafe Shutdowns')}: ${smart.endurance.unsafeShutdowns}`);
             }
             if (powerParts.length > 0) {
-                this._addInfoLine(`  ${powerParts.join(' · ')}`, 'nvme-smart-attr', ICONS.Plug);
+                this._addInfoLine(`${powerParts.join(' · ')}`, 'nvme-smart-attr', ICONS.Plug);
             }
 
             // Data + Host on a single line. Each group keeps its own section
@@ -1780,7 +1928,7 @@ const Indicator = GObject.registerClass(
         // -------------------------------------------------------------------
         _installV2Stack() {
             const setupPath = GLib.build_filenamev([this._extensionPath || '', SETUP_SCRIPT_NAME]);
-            const wasInSmartGroup = isCurrentUserInSmartGroup();
+            const wasInSmartGroup = checkCurrentUserInSmartGroup();
             _debug(`_installV2Stack: setupPath=${setupPath}`);
 
             if (!GLib.file_test(setupPath, GLib.FileTest.EXISTS)) {
@@ -1792,38 +1940,41 @@ const Indicator = GObject.registerClass(
             }
 
             _debug('Running pkexec setup-polkit.sh...');
-            this._v2Toggle.setSensitive(false);
-
-            const result = runPkexecSync([setupPath]);
-
-            this._v2Toggle.setSensitive(true);
-
-            if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
-            if (result.stdout) _debug(`stdout: ${result.stdout.trim()}`);
-
-            if (result.ok && result.exitCode === 0) {
-                _debug('Installation complete');
-                const body = wasInSmartGroup
-                    ? ''
-                    : _('Please log out and back in for new group membership.');
-                notify(_('NVMe polkit stack installed!'), body);
-                this._updateV2ToggleState(true);
-                this._startPolling();
-                this._refreshDevices();
-            } else {
-                _warn(`Installation failed (exit code ${result.exitCode})`);
-                notifyError(_('Installation failed (exit code ') + result.exitCode + ')');
-                this._updateV2ToggleState(false);
-            }
-
-            this._v2Updating = false;
+this._v2Toggle.setSensitive(false);
+runPkexecAsync([setupPath]).then(result => {
+    this._v2Toggle.setSensitive(true);
+    if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
+    if (result.stdout) _debug(`stdout: ${result.stdout.trim()}`);
+    if (result.ok && result.exitCode === 0) {
+        _debug('Installation complete');
+        const body = wasInSmartGroup
+            ? ''
+            : _('Please log out and back in for new group membership.');
+        notify(_('NVMe polkit stack installed!'), body);
+        this._updateV2ToggleState(true);
+        this._startPolling();
+        this._refreshDevices();
+    } else {
+        _warn(`Installation failed (exit code ${result.exitCode}): ${result.stderr || result.stdout}`);
+        const errorMsg = result.stderr ? result.stderr.trim() : `Exit code: ${result.exitCode}`;
+        notifyError(_('Installation failed'), errorMsg);
+        this._updateV2ToggleState(false);
+    }
+    this._v2Updating = false;
+}).catch(e => {
+    this._v2Toggle.setSensitive(true);
+    _warn(`Installation failed: ${e.message}`);
+    notifyError(_('Installation failed'), e.message);
+    this._updateV2ToggleState(false);
+    this._v2Updating = false;
+});
         }
 
         // -------------------------------------------------------------------
         // v2: Uninstall the polkit stack via nvme-smart-uninstall.sh
         // -------------------------------------------------------------------
         _uninstallV2Stack() {
-            if (!isUninstallAvailable()) {
+            if (!checkUninstallAvailable()) {
                 _uninstallNotFoundCount++;
                 _debug(`Uninstall script not found. (count=${_uninstallNotFoundCount}/${KILL_THRESHOLD})`);
 
@@ -1856,28 +2007,31 @@ const Indicator = GObject.registerClass(
             }
 
             _debug('Running pkexec nvme-smart-uninstall.sh...');
-            this._v2Toggle.setSensitive(false);
-
-            const result = runPkexecSync([UNINSTALL_PATH]);
-
-            this._v2Toggle.setSensitive(true);
-
-            if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
-            if (result.stdout) _debug(`stdout: ${result.stdout.trim()}`);
-
-            if (result.ok && result.exitCode === 0) {
-                _debug('Uninstall complete');
-                notify(_('NVMe polkit stack uninstalled.'), '');
-                this._updateV2ToggleState(false);
-                this._stopPolling();
-                this._refreshDevices();
-            } else {
-                _warn(`Uninstall failed (exit code ${result.exitCode})`);
-                notifyError(_('Uninstall failed (exit code ') + result.exitCode + ')');
-                this._updateV2ToggleState(true);
-            }
-
-            this._v2Updating = false;
+this._v2Toggle.setSensitive(false);
+runPkexecAsync([UNINSTALL_PATH]).then(result => {
+    this._v2Toggle.setSensitive(true);
+    if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
+    if (result.stdout) _debug(`stdout: ${result.stdout.trim()}`);
+    if (result.ok && result.exitCode === 0) {
+        _debug('Uninstall complete');
+        notify(_('NVMe polkit stack uninstalled.'), '');
+        this._updateV2ToggleState(false);
+        this._stopPolling();
+        this._refreshDevices();
+    } else {
+        _warn(`Uninstall failed (exit code ${result.exitCode}): ${result.stderr || result.stdout}`);
+        const errorMsg = result.stderr ? result.stderr.trim() : `Exit code: ${result.exitCode}`;
+        notifyError(_('Uninstall failed'), errorMsg);
+        this._updateV2ToggleState(true);
+    }
+    this._v2Updating = false;
+}).catch(e => {
+    this._v2Toggle.setSensitive(true);
+    _warn(`Uninstall failed: ${e.message}`);
+    notifyError(_('Uninstall failed'), e.message);
+    this._updateV2ToggleState(true);
+    this._v2Updating = false;
+});
         }
 
 
@@ -1907,14 +2061,33 @@ export default class IndicatorExampleExtension extends Extension {
         // Detect the installed nvme-cli version once and warn if affected.
         _checkNvmeCliVersion(GLib.find_program_in_path('nvme'));
         // Start polling if the polkit stack is already installed.
-        if (isV2Installed()) {
+        if (checkV2Installed()) {
             this._indicator._startPolling();
         }
+        this._loadSettings();
+        this._indicator._openPreferences = () => this.openPreferences();
         Main.panel.addToStatusArea(this.uuid, this._indicator);
         // Load extension stylesheet (device header, meta lines, smart values)
         this._stylesheet = Gio.File.new_for_path(GLib.build_filenamev([this.path, 'stylesheet.css']));
         St.ThemeContext.get_for_stage(global.stage).get_theme().load_stylesheet(this._stylesheet);
         _debug('enable() exit');
+    }
+
+    // Load GSettings; pre-fill the temperature unit from the session locale
+    // on first launch, then keep the indicator in sync with the stored value.
+    _loadSettings() {
+        this._settings = this.getSettings();
+        if (!this._settings.get_boolean('unit-initialized')) {
+            const detected = detectTemperatureUnit(GLib.getenv);
+            this._settings.set_string('temperature-unit', detected);
+            this._settings.set_boolean('unit-initialized', true);
+            _debug(`temperature unit pre-filled from locale: ${detected}`);
+        }
+        this._indicator._tempUnit = this._settings.get_string('temperature-unit');
+        this._settingsId = this._settings.connect('changed::temperature-unit', (settings) => {
+            this._indicator._tempUnit = settings.get_string('temperature-unit');
+            this._indicator._refreshDevices();
+        });
     }
 
     disable() {
@@ -1926,7 +2099,17 @@ export default class IndicatorExampleExtension extends Extension {
         if (this._indicator) {
             this._indicator.destroy();
         }
+        if (this._indicator)
+            this._indicator._openPreferences = null;
         this._indicator = null;
+        if (this._settingsId) {
+            this._settings.disconnect(this._settingsId);
+            this._settingsId = null;
+        }
+        if (this._settings) {
+            this._settings.run_dispose();
+            this._settings = null;
+        }
         _debug('disable() exit');
     }
 }

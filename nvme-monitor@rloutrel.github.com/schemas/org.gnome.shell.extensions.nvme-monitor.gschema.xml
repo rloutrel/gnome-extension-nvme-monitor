@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.nvme-monitor"
+          path="/org/gnome/shell/extensions/nvme-monitor/">
+    <key name="temperature-unit" type="s">
+      <choices>
+        <choice value="celsius"/>
+        <choice value="fahrenheit"/>
+      </choices>
+      <default>'celsius'</default>
+      <summary>Temperature unit</summary>
+      <description>Unit used to display drive temperatures (Celsius or Fahrenheit)</description>
+    </key>
+    <key name="unit-initialized" type="b">
+      <default>false</default>
+      <summary>Temperature unit initialized</summary>
+      <description>Set to true once the temperature unit has been pre-filled from the session locale on first launch</description>
+    </key>
+  </schema>
+</schemalist>

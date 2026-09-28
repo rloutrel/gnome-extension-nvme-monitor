@@ -11,7 +11,7 @@ export function normalizeUsageSegments(entries) {
             avail: Number(entry.avail) || 0,
             total: Number(entry.total) || 0,
             isLvm: Boolean(entry.isLvm),
-            color: entry.color || [0.75, 0.11, 0.14],
+            color: entry.color || USAGE_FREE_COLOR,
         }));
 }
 
