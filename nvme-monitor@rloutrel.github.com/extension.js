@@ -324,8 +324,10 @@ function runPkexecAsync(argv) {
 
 const Indicator = GObject.registerClass(
     class Indicator extends PanelMenu.Button {
-        _init() {
+        _init({extensionPath = '', openPreferences = null} = {}) {
             super._init(0.0, _('NVMe Monitor'));
+            this._extensionPath = extensionPath;
+            this._openPreferences = openPreferences;
 
             // Panel icon — single NVMe outline icon.
             this._panelIcon = new St.Icon({
@@ -2051,8 +2053,10 @@ export default class IndicatorExampleExtension extends Extension {
 
     enable() {
         _debug('enable() enter');
-        this._indicator = new Indicator();
-        this._indicator._extensionPath = this.path;
+        this._indicator = new Indicator({
+            extensionPath: this.path,
+            openPreferences: () => this.openPreferences(),
+        });
         this._indicator._setupIcon();
         this._indicator._checkSetupScript();
         // Restore the persisted rolling temperature history from /tmp so a
@@ -2065,7 +2069,6 @@ export default class IndicatorExampleExtension extends Extension {
             this._indicator._startPolling();
         }
         this._loadSettings();
-        this._indicator._openPreferences = () => this.openPreferences();
         Main.panel.addToStatusArea(this.uuid, this._indicator);
         // Load extension stylesheet (device header, meta lines, smart values)
         this._stylesheet = Gio.File.new_for_path(GLib.build_filenamev([this.path, 'stylesheet.css']));
@@ -2098,10 +2101,8 @@ export default class IndicatorExampleExtension extends Extension {
         }
         if (this._indicator) {
             this._indicator.destroy();
+            this._indicator = null;
         }
-        if (this._indicator)
-            this._indicator._openPreferences = null;
-        this._indicator = null;
         if (this._settingsId) {
             this._settings.disconnect(this._settingsId);
             this._settingsId = null;
