@@ -1,4 +1,5 @@
-import {normalizeDevicePath, parseFilesystemUsage} from './diskUsageModel.js';
+import {parseFilesystemUsage} from './diskUsageModel.js';
+import {parsePvReport, filterUsablePhysicalVolumes, parseLvReport} from './lvmReport.js';
 
 export function collectFilesystemUsage(runCommandSync) {
     const result = runCommandSync(['df', '-P', '-T', '-k']);
@@ -22,39 +23,23 @@ export function collectLvmInfo(runCommandSync, labels = {}, debug = () => {}) {
     };
 
     try {
-        const pvReport = pvsResult.ok && pvsResult.exitCode === 0
-            ? JSON.parse(pvsResult.stdout).report || [] : [];
-        const lvReport = lvsResult.ok && lvsResult.exitCode === 0
-            ? JSON.parse(lvsResult.stdout).report || [] : [];
         const lsblk = collectLsblkPvInfo(runCommandSync, labels, debug);
         diagnostics.lsblk = lsblk.diagnostics;
-        const mergedPvMap = new Map(lsblk.physicalVolumes.map(pv => [pv.source, {...pv}]));
 
-        for (const pv of pvReport[0]?.pv || []) {
-            const source = normalizeDevicePath(pv.pv_name);
-            if (!source) continue;
-            const total = Number(pv.pv_size) / 1024;
-            const avail = Number(pv.pv_free) / 1024;
-            const previous = mergedPvMap.get(source);
-            mergedPvMap.set(source, {
-                source,
-                volumeGroup: pv.vg_name || labels.notAssigned || 'Not assigned',
-                total: Number.isFinite(total) ? total : (previous?.total ?? 0),
-                avail: Number.isFinite(avail) ? avail : (previous?.avail ?? 0),
-            });
-        }
+        const previousPvs = new Map(lsblk.physicalVolumes.map(pv => [pv.source, {...pv}]));
+        const pvParse = pvsResult.ok && pvsResult.exitCode === 0
+            ? parsePvReport(pvsResult.stdout, {
+                previous: previousPvs,
+                notAssigned: labels.notAssigned || 'Not assigned',
+            })
+            : {physicalVolumes: [...previousPvs.values()]};
+        const lvParse = lvsResult.ok && lvsResult.exitCode === 0
+            ? parseLvReport(lvsResult.stdout)
+            : {logicalVolumes: []};
 
         return {
-            physicalVolumes: [...mergedPvMap.values()]
-                .filter(pv => pv.source && Number.isFinite(pv.total) && pv.total > 0),
-            logicalVolumes: (lvReport[0]?.lv || []).map(lv => ({
-                source: lv.lv_path,
-                volumeGroup: lv.vg_name,
-                logicalVolume: lv.lv_name,
-                size: Number(lv.lv_size),
-                attr: lv.lv_attr || '',
-                devices: lv.devices || '',
-            })).filter(lv => lv.source && lv.volumeGroup),
+            physicalVolumes: filterUsablePhysicalVolumes(pvParse.physicalVolumes),
+            logicalVolumes: lvParse.logicalVolumes,
             diagnostics,
         };
     } catch (error) {
