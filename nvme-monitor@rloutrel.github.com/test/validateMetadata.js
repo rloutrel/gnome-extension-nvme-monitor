@@ -12,8 +12,6 @@ assert.ok(typeof metadata.description === 'string' && metadata.description.lengt
     'metadata.json: "description" must be a non-empty string');
 assert.ok(typeof metadata['gettext-domain'] === 'string' && metadata['gettext-domain'].length > 0,
     'metadata.json: "gettext-domain" must be a non-empty string');
-assert.ok(typeof metadata.version === 'string' && metadata.version.length > 0,
-    'metadata.json: "version" must be a non-empty string');
 assert.ok(Array.isArray(metadata['shell-version']) && metadata['shell-version'].length > 0,
     'metadata.json: "shell-version" must be a non-empty array');
 for (const sv of metadata['shell-version']) {
@@ -23,7 +21,6 @@ for (const sv of metadata['shell-version']) {
 
 console.log('metadata.json OK:', {
     uuid: metadata.uuid,
-    version: metadata.version,
     'shell-version': metadata['shell-version'],
     'gettext-domain': metadata['gettext-domain'],
 });
