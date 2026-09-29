@@ -52,6 +52,14 @@ top-bar menu: SMART log data, temperature, endurance and critical warnings.
   overflow in 2.0–2.2; the `nvme list -o json` nested-layout format change in
   2.11–2.12 and 3.0+) and parses both layouts, warning the user when needed.
 
+## Device coverage
+
+Vendor coverage is documented in [SUPPORTED.md](SUPPORTED.md): a list of
+supported manufacturers (Samsung, Western Digital, Micron, Crucial,
+SK Hynix, Intel) and the concrete device models tested against real
+hardware. If your drive is not recognized, the extension shows a red `!`
+button that opens a support dialog to report it.
+
 ## Requirements
 
 - GNOME Shell **50 / 51**.

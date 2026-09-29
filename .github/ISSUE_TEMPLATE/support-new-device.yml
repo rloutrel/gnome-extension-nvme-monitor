@@ -1,19 +1,36 @@
 name: Support new device
-description: Request support for an NVMe device that shows as "Unknown" manufacturer
+description: Report an NVMe device that shows as "Unknown", or that behaves oddly despite a supported manufacturer
 title: "[Device] "
 labels: ["new-device"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping extend device coverage! The manufacturer is
-        detected from the model/serial number, so an "Unknown" device means
-        we are missing a detection pattern for your drive.
+        Thanks for helping extend device coverage!
 
-        Please run the following command and paste the full JSON output below:
+        Two cases are handled here:
+
+        - **Unknown device** — the manufacturer is not detected (the menu
+          shows a red `!` button next to the drive). The detection pattern
+          for this drive is missing.
+        - **Supported manufacturer, unexpected behaviour** — missing
+          temperature sensors, odd values, mislabelled data. Devices of the
+          same manufacturer are *probably* similar, but this is not
+          guaranteed: vendor log pages and sensor layouts differ between
+          models and firmware generations.
+
+        **In both cases, please provide all the requested information.**
+        Even if the manufacturer is already listed as supported in
+        [SUPPORTED.md](../SUPPORTED.md), your drive may differ slightly
+        from the tested models — the data below lets us add your exact
+        drive to the test fixtures.
+
+        Run the following commands and paste the full JSON output below
+        (you may redact serial numbers):
 
         ```
         sudo nvme smart-log /dev/nvme0n1 -o json
+        nvme list -o json
         ```
 
   - type: input
@@ -34,11 +51,21 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: case
+    attributes:
+      label: Case
+      options:
+        - Unknown manufacturer (red "!" shown in the menu)
+        - Supported manufacturer, but behaviour looks wrong
+    validations:
+      required: true
+
   - type: textarea
     id: smart-log
     attributes:
       label: "Output of `nvme smart-log -o json`"
-      description: Full JSON output. This is the key data needed to add support.
+      description: Full JSON output. This is the key data needed to add or verify support.
       render: json
       placeholder: |
         {
@@ -55,13 +82,11 @@ body:
   - type: textarea
     id: device-list
     attributes:
-      label: "Output of `nvme list -o json` (optional)"
-      description: |
-        Helps confirm the `ModelNumber` string used for detection.
-        You may redact the serial number.
+      label: "Output of `nvme list -o json`"
+      description: Confirms the `ModelNumber` string used for detection. You may redact the serial number.
       render: json
     validations:
-      required: false
+      required: true
 
   - type: input
     id: nvme-cli-version
@@ -71,6 +96,14 @@ body:
       placeholder: e.g. "nvme-cli 2.11"
     validations:
       required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behaviour
+      description: What the extension shows vs. what you expected (e.g. missing sensors, wrong labels).
+    validations:
+      required: false
 
   - type: textarea
     id: notes
