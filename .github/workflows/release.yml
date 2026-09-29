@@ -35,42 +35,59 @@ jobs:
           done
 
       - name: Assemble extension zip
+        working-directory: nvme-monitor@rloutrel.github.com
         run: |
-          uuid="nvme-monitor@rloutrel.github.com"
-          zip "${uuid}.zip" \
-            "${uuid}/extension.js" \
-            "${uuid}/indicator.js" \
-            "${uuid}/logger.js" \
-            "${uuid}/subprocess.js" \
-            "${uuid}/icons.js" \
-            "${uuid}/tempChart.js" \
-            "${uuid}/v2flow.js" \
-            "${uuid}/v2decisions.js" \
-            "${uuid}/smartStatus.js" \
-            "${uuid}/usageFormatting.js" \
-            "${uuid}/overlayGeometry.js" \
-            "${uuid}/tempTiers.js" \
-            "${uuid}/smartParser.js" \
-            "${uuid}/tempFormat.js" \
-            "${uuid}/tempUnit.js" \
-            "${uuid}/versionUtils.js" \
-            "${uuid}/deviceList.js" \
-            "${uuid}/tempHistory.js" \
-            "${uuid}/format.js" \
-            "${uuid}/diskUsage.js" \
-            "${uuid}/diskUsageModel.js" \
-            "${uuid}/diskDiscovery.js" \
-            "${uuid}/lvmReport.js" \
-            "${uuid}/polkitManager.js" \
-            "${uuid}/prefs.js" \
-            "${uuid}/stylesheet.css" \
-            "${uuid}/metadata.json" \
-            "${uuid}/setup-polkit.sh" \
-            "${uuid}/schemas/org.gnome.shell.extensions.nvme-monitor.gschema.xml" \
-            "${uuid}/schemas/gschemas.compiled" \
-            "${uuid}/icons" \
-            "${uuid}/locale"
-          unzip -l "${uuid}.zip"
+          zip -r "../nvme-monitor@rloutrel.github.com.zip" . \
+            -x 'po/*' \
+            -x 'test/*'
+          unzip -l "../nvme-monitor@rloutrel.github.com.zip"
+
+      - name: Validate zip structure
+        run: |
+          python3 - <<'EOF'
+          import os
+          import sys
+          import zipfile
+
+          path = 'nvme-monitor@rloutrel.github.com.zip'
+          uuid = 'nvme-monitor@rloutrel.github.com'
+          errors = []
+
+          with zipfile.ZipFile(path) as archive:
+              names = archive.namelist()
+
+              if 'metadata.json' not in names:
+                  errors.append('metadata.json missing at archive root')
+              if 'extension.js' not in names:
+                  errors.append('extension.js missing at archive root')
+              elif archive.getinfo('extension.js').file_size == 0:
+                  errors.append('extension.js is empty at archive root')
+
+              nested = [n for n in names if n.startswith(f'{uuid}/')]
+              if nested:
+                  errors.append(f'{len(nested)} entries nested under {uuid}/: {nested[:3]}')
+
+              if not any(n.startswith('locale/') for n in names):
+                  errors.append('locale/ missing from archive')
+              if 'schemas/gschemas.compiled' not in names:
+                  errors.append('schemas/gschemas.compiled missing from archive')
+
+              forbidden = [n for n in names
+                           if n.startswith(('po/', 'test/'))]
+              if forbidden:
+                  errors.append(f'excluded paths present: {forbidden[:3]}')
+
+              total = sum(i.file_size for i in archive.infolist()
+                          if not i.is_dir())
+              if total > 5 * 1024 * 1024:
+                  errors.append(f'uncompressed size {total} bytes exceeds 5 MB limit')
+
+          if errors:
+              for error in errors:
+                  print(f'::error::{error}')
+              sys.exit(1)
+          print(f'Zip structure OK: {path}, uncompressed {total} bytes')
+          EOF
 
       - name: Attach to release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
