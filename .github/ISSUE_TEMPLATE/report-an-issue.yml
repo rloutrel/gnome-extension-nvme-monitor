@@ -1,0 +1,98 @@
+name: Report an issue
+description: Report a bug or unexpected behaviour in the extension
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue! Please fill in the
+        details below so it can be reproduced and diagnosed.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the problem. What happened, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the menu
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: gnome-version
+    attributes:
+      label: GNOME Shell version
+      placeholder: e.g. "48.2"
+    validations:
+      required: true
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension version
+      description: The version shown in the Extensions app or `gnome-extensions info nvme-monitor@rloutrel.github.com`.
+      placeholder: e.g. "17"
+    validations:
+      required: true
+
+  - type: input
+    id: nvme-cli-version
+    attributes:
+      label: nvme-cli version
+      description: Output of `nvme version`.
+      placeholder: e.g. "nvme-cli 2.11"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Installation method
+      options:
+        - Extensions website (ego.gnome.org)
+        - Manual install from source
+        - Package manager (distro package / AUR / etc.)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: polkit
+    attributes:
+      label: Polkit stack
+      description: Was the polkit wrapper (`setup-polkit.sh`) installed and did you re-login afterwards?
+      options:
+        - "Yes, installed and re-logged"
+        - "Installed, but not re-logged yet"
+        - "No / not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Output of `journalctl -r -o cat /usr/bin/gnome-shell | grep NVMe-monitor` (last lines).
+        Also useful: Looking Glass logs (`lg`, extension logs).
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: device-info
+    attributes:
+      label: Device information (optional)
+      description: Relevant `nvme list -o json` / `nvme smart-log -o json` output if the issue is device-related. You may redact serial numbers.
+      render: json
+    validations:
+      required: false

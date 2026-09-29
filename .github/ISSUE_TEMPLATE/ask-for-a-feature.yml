@@ -1,0 +1,43 @@
+name: Ask for a feature
+description: Suggest an idea or improvement for the extension
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! Please describe the problem you are
+        trying to solve — features are evaluated based on the use case,
+        not just the proposed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What is currently impossible, annoying or missing?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What should the extension do? Mockups and screenshots are welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other workarounds, other extensions, vendor tools, etc.
+    validations:
+      required: false
+
+  - type: input
+    id: gnome-version
+    attributes:
+      label: GNOME Shell version
+      placeholder: e.g. "48.2"
+    validations:
+      required: false
