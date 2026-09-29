@@ -1,0 +1,81 @@
+name: Support new device
+description: Request support for an NVMe device that shows as "Unknown" manufacturer
+title: "[Device] "
+labels: ["new-device"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping extend device coverage! The manufacturer is
+        detected from the model/serial number, so an "Unknown" device means
+        we are missing a detection pattern for your drive.
+
+        Please run the following command and paste the full JSON output below:
+
+        ```
+        sudo nvme smart-log /dev/nvme0n1 -o json
+        ```
+
+  - type: input
+    id: device-model
+    attributes:
+      label: Device model
+      description: The `ModelNumber` from `nvme list -o json` (or the drive label).
+      placeholder: e.g. "SAMSUNG MZVL2512HCJQ-00B00"
+    validations:
+      required: true
+
+  - type: input
+    id: manufacturer
+    attributes:
+      label: Manufacturer
+      description: The real manufacturer, as printed on the drive or its datasheet.
+      placeholder: e.g. "Corsair"
+    validations:
+      required: true
+
+  - type: textarea
+    id: smart-log
+    attributes:
+      label: "Output of `nvme smart-log -o json`"
+      description: Full JSON output. This is the key data needed to add support.
+      render: json
+      placeholder: |
+        {
+          "critical_warning": 0,
+          "temperature": 317,
+          "avail_spare": 100,
+          "spare_thresh": 10,
+          "percent_used": 0,
+          ...
+        }
+    validations:
+      required: true
+
+  - type: textarea
+    id: device-list
+    attributes:
+      label: "Output of `nvme list -o json` (optional)"
+      description: |
+        Helps confirm the `ModelNumber` string used for detection.
+        You may redact the serial number.
+      render: json
+    validations:
+      required: false
+
+  - type: input
+    id: nvme-cli-version
+    attributes:
+      label: nvme-cli version
+      description: Output of `nvme version`.
+      placeholder: e.g. "nvme-cli 2.11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Anything else useful — datasheet sensor mapping, vendor tooling quirks, etc.
+    validations:
+      required: false

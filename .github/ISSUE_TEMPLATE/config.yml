@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & discussions
+    url: https://github.com/rloutrel/gnome-extension-nvme-monitor/discussions
+    about: Ask questions and discuss usage in the project discussions.
