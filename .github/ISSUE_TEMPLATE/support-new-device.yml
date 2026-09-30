@@ -21,7 +21,7 @@ body:
 
         **In both cases, please provide all the requested information.**
         Even if the manufacturer is already listed as supported in
-        [SUPPORTED.md](../../SUPPORTED.md), your drive may differ slightly
+        [SUPPORTED.md](https://github.com/rloutrel/gnome-extension-nvme-monitor/blob/main/SUPPORTED.md), your drive may differ slightly
         from the tested models — the data below lets us add your exact
         drive to the test fixtures.
 
