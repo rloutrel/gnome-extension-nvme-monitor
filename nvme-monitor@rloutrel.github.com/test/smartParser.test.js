@@ -11,7 +11,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSmart, getParser } from '../smartParser.js';
+import { parseSmart, getParser, detectManufacturer, getSupportLevel, SUPPORTED_MANUFACTURERS } from '../smartParser.js';
+import VALIDATED_DEVICES from '../validatedDevices.json' with {type: 'json'};
 
 // ---------------------------------------------------------------------------
 // Fixture: Samsung SSD 980 500GB
@@ -165,6 +166,16 @@ test('samsung_ssd_970_evo_plus_2tb: no temperature warning (critical_warning 0)'
 // Manufacturer detection without a model hint (SMART log has no ModelNumber)
 // ---------------------------------------------------------------------------
 
+test('SUPPORTED_MANUFACTURERS matches the vendor detection patterns', () => {
+    assert.ok(SUPPORTED_MANUFACTURERS.includes('Samsung'));
+    assert.ok(SUPPORTED_MANUFACTURERS.includes('WD'));
+    assert.ok(SUPPORTED_MANUFACTURERS.includes('Micron'));
+    assert.ok(SUPPORTED_MANUFACTURERS.includes('Crucial'));
+    assert.ok(SUPPORTED_MANUFACTURERS.includes('SKHynix'));
+    assert.ok(SUPPORTED_MANUFACTURERS.includes('Intel'));
+    assert.ok(Object.isFrozen(SUPPORTED_MANUFACTURERS));
+});
+
 test('without model hint, manufacturer is Unknown and BaseParser is used', () => {
     // The SMART log JSON does not contain ModelNumber, so without a hint the
     // Samsung-specific sensor parsing must not run.
@@ -178,3 +189,85 @@ test('explicit manufacturer override selects SamsungParser', () => {
     assert.strictEqual(smart.manufacturer, 'Samsung');
     assert.deepStrictEqual(smart.temperature.sensors, [83.9, 42.9]);
 });
+
+test('detectManufacturer works from the model number alone (no SMART data)', () => {
+    assert.equal(detectManufacturer('Samsung SSD 970 EVO Plus 2TB'), 'Samsung');
+    assert.equal(detectManufacturer('WD Blue SN570 1TB'), 'WD');
+    assert.equal(detectManufacturer('Micron 2200S'), 'Micron');
+    assert.equal(detectManufacturer('Crucial P5 Plus 2TB'), 'Crucial');
+    assert.equal(detectManufacturer('SK hynix Gold P31'), 'SKHynix');
+    assert.equal(detectManufacturer('Intel SSD 660p'), 'Intel');
+    assert.equal(detectManufacturer('Kingston KC3000'), 'Unknown');
+    assert.equal(detectManufacturer(''), 'Unknown');
+    assert.equal(detectManufacturer(null), 'Unknown');
+});
+
+test('getSupportLevel: validated model has no support button', () => {
+    assert.equal(
+        getSupportLevel('Samsung SSD 970 EVO Plus 2TB', 'Samsung', false, VALIDATED_DEVICES),
+        'validated');
+});
+
+test('getSupportLevel: supported manufacturer, unvalidated model asks to confirm', () => {
+    assert.equal(
+        getSupportLevel('Samsung SSD 870 EVO 1TB', 'Samsung', false, VALIDATED_DEVICES),
+        'confirm');
+    assert.equal(
+        getSupportLevel('WD Blue SN570 1TB', 'WD', false, VALIDATED_DEVICES),
+        'confirm');
+});
+
+test('getSupportLevel: unknown manufacturer or parse problem asks to report', () => {
+    assert.equal(
+        getSupportLevel('Kingston KC3000', 'Unknown', false, VALIDATED_DEVICES),
+        'report');
+    assert.equal(
+        getSupportLevel('Samsung SSD 980 500GB', 'Samsung', true, VALIDATED_DEVICES),
+        'report');
+    assert.equal(
+        getSupportLevel('', 'Unknown', false, VALIDATED_DEVICES),
+        'report');
+});
+
+// ---------------------------------------------------------------------------
+// Validated-devices registry coverage: every registered ModelNumber must have
+// a fixture-based parsing test above with a typical nvme smart-log JSON body,
+// and must keep parsing without errors, so a registry entry can never hide a
+// broken device.
+// ---------------------------------------------------------------------------
+
+const VALIDATED_FIXTURES = {
+    'Samsung SSD 970 EVO Plus 2TB': {
+        model: SAMSUNG_970_EVO_PLUS_2TB_MODEL,
+        raw: SAMSUNG_970_EVO_PLUS_2TB_RAW,
+    },
+    'Samsung SSD 980 500GB': {
+        model: SAMSUNG_980_500GB_MODEL,
+        raw: SAMSUNG_980_500GB_RAW,
+    },
+};
+
+test('validated-devices registry: every device has a fixture with a typical JSON body', () => {
+    const registered = Object.keys(VALIDATED_DEVICES);
+    assert.ok(registered.length > 0, 'registry is empty');
+    for (const model of registered) {
+        const fixture = VALIDATED_FIXTURES[model];
+        assert.ok(fixture, `no smartParser fixture for validated device "${model}"`);
+        assert.ok(Object.keys(fixture.raw).length > 0,
+            `fixture for "${model}" has no JSON body`);
+    }
+});
+
+test('validated-devices registry: every device keeps parsing without errors', () => {
+    for (const [model, entry] of Object.entries(VALIDATED_DEVICES)) {
+        const fixture = VALIDATED_FIXTURES[model];
+        const smart = parseSmart(fixture.raw, fixture.model);
+        assert.equal(smart.manufacturer, entry.manufacturer,
+            `validated device "${model}" no longer parses as ${entry.manufacturer}`);
+        assert.notEqual(smart.manufacturer, 'Unknown',
+            `validated device "${model}" parses as Unknown`);
+        assert.ok(smart.temperature.composite !== null && smart.temperature.composite !== undefined,
+            `validated device "${model}" has no composite temperature`);
+    }
+});
+

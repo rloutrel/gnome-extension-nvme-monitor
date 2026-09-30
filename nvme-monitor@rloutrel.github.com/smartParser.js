@@ -13,6 +13,17 @@
 
 // Pure module: no GJS imports, so it can be unit-tested with Node.
 
+// Manufacturers with a dedicated vendor parser / detection pattern. Surfaced
+// in-app so users can see at a glance whether their drive is covered.
+export const SUPPORTED_MANUFACTURERS = Object.freeze([
+    'Samsung',
+    'WD',
+    'Micron',
+    'Crucial',
+    'SKHynix',
+    'Intel',
+]);
+
 // ---------------------------------------------------------------------------
 // Base Parser: Standard NVMe SMART fields (NVMe Specification)
 // ---------------------------------------------------------------------------
@@ -386,10 +397,52 @@ export function getParser(raw, manufacturer = null, modelHint = null) {
 }
 
 /**
+ * Detect the manufacturer from the device model number alone, without
+ * any SMART data (e.g. when the smart-log stack is not installed).
+ * @param {string} modelHint - ModelNumber from `nvme list`
+ * @returns {string} Manufacturer name (normalized), 'Unknown' if not detected
+ */
+export function detectManufacturer(modelHint = '') {
+    return new BaseParser(null, modelHint)._detectManufacturer();
+}
+
+/**
  * Convenience function: parse SMART JSON in one call.
  * @param {Object} raw - Raw SMART JSON from nvme smart-log
  * @returns {ParsedSmartData}
  */
 export function parseSmart(raw, modelHint = null) {
     return getParser(raw, null, modelHint).parse();
+}
+/**
+ * Support level for a device, based on the validated-devices registry.
+ *
+ * Levels:
+ *  - 'validated': the exact ModelNumber is in the registry (fully tested,
+ *    no support button).
+ *  - 'confirm': the manufacturer is supported but the exact model is not
+ *    validated yet; rendering is expected to work — ask the user to
+ *    confirm it looks right (yellow "!").
+ *  - 'report': unknown manufacturer or SMART parsing problem; ask the user
+ *    to provide the raw data (red "!").
+ *
+ * @param {string} modelNumber - ModelNumber from `nvme list -o json`
+ * @param {string} manufacturer - Detected manufacturer ('Unknown' if none)
+ * @param {boolean} parseProblem - True when SMART parsing failed or the
+ *   expected parser could not be applied
+ * @param {Object} validated - Validated-devices registry
+ *   (ModelNumber -> {manufacturer})
+ * @returns {string} 'validated' | 'confirm' | 'report'
+ */
+export function getSupportLevel(modelNumber, manufacturer, parseProblem, validated) {
+    if (parseProblem)
+        return 'report';
+    const entry = validated[String(modelNumber || '').trim()];
+    if (entry && entry.manufacturer)
+        return 'validated';
+    const detected = String(manufacturer || '').toLowerCase();
+    if (detected && detected !== 'unknown' &&
+        SUPPORTED_MANUFACTURERS.some(m => m.toLowerCase() === detected))
+        return 'confirm';
+    return 'report';
 }

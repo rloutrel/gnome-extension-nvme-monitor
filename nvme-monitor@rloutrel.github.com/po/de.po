@@ -237,3 +237,58 @@ msgstr "Volumegruppe"
 #: indicator.js:351
 msgid "Not assigned"
 msgstr "Nicht zugewiesen"
+
+#: indicator.js:882
+msgid "Device support"
+msgstr "Geräteunterstützung"
+
+#: indicator.js:899
+msgid "Unknown device"
+msgstr "Unbekanntes Gerät"
+
+#: indicator.js:901
+msgid "This device (%s) has not been explicitly confirmed as working yet. Sharing the data below via a GitHub issue helps improve support for this model."
+msgstr "Dieses Gerät (%s) wurde noch nicht ausdrücklich als funktionierend bestätigt. Wenn Sie die unten stehenden Daten über ein GitHub-Issue teilen, hilft das, die Unterstützung für dieses Modell zu verbessern."
+
+#: indicator.js:909
+msgid "Supported manufacturers: %s"
+msgstr "Unterstützte Hersteller: %s"
+
+#: indicator.js:918
+msgid "Output of nvme list:"
+msgstr "Ausgabe von nvme list:"
+
+#: indicator.js:922
+msgid "Output of nvme smart-log:"
+msgstr "Ausgabe von nvme smart-log:"
+
+#: indicator.js:1017
+msgid "Copy to clipboard"
+msgstr "In die Zwischenablage kopieren"
+
+#: indicator.js:1135
+msgid "The output could not be collected automatically. Run the command below in a terminal, then paste the result in the issue."
+msgstr "Die Ausgabe konnte nicht automatisch erfasst werden. Führen Sie den Befehl unten in einem Terminal aus und fügen Sie das Ergebnis in das Issue ein."
+
+#: indicator.js:1040
+msgid "Copied!"
+msgstr "Kopiert!"
+
+#: indicator.js:944
+msgid "Open a support issue"
+msgstr "Support-Issue öffnen"
+
+#: indicator.js:1000
+msgid "Could not open the support issue page"
+msgstr "Die Support-Issue-Seite konnte nicht geöffnet werden"
+
+#: indicator.js:157
+msgid "Close"
+msgstr "Schließen"
+#: indicator.js
+msgid "This device (%s) belongs to a supported manufacturer, but it has not been explicitly confirmed as working yet. Please open a GitHub issue to confirm that it works, or to specify the problem that you are encountering, and share the data below."
+msgstr "Dieses Gerät (%s) gehört zu einem unterstützten Hersteller, wurde aber noch nicht explizit als funktionierend bestätigt. Bitte öffne ein GitHub-Ticket, um zu bestätigen, dass es funktioniert, oder um das Problem zu schildern, auf das du stößt, und teile die untenstehenden Daten mit."
+
+#: indicator.js
+msgid "Confirm device rendering"
+msgstr "Gerätedarstellung bestätigen"

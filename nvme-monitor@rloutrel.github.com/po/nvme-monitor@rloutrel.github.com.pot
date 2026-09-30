@@ -237,3 +237,58 @@ msgstr ""
 #: indicator.js:351
 msgid "Not assigned"
 msgstr ""
+
+#: indicator.js:882
+msgid "Device support"
+msgstr ""
+
+#: indicator.js:899
+msgid "Unknown device"
+msgstr ""
+
+#: indicator.js:901
+msgid "This device (%s) has not been explicitly confirmed as working yet. Sharing the data below via a GitHub issue helps improve support for this model."
+msgstr ""
+
+#: indicator.js:909
+msgid "Supported manufacturers: %s"
+msgstr ""
+
+#: indicator.js:918
+msgid "Output of nvme list:"
+msgstr ""
+
+#: indicator.js:922
+msgid "Output of nvme smart-log:"
+msgstr ""
+
+#: indicator.js:1017
+msgid "Copy to clipboard"
+msgstr ""
+
+#: indicator.js:1135
+msgid "The output could not be collected automatically. Run the command below in a terminal, then paste the result in the issue."
+msgstr ""
+
+#: indicator.js:1040
+msgid "Copied!"
+msgstr ""
+
+#: indicator.js:944
+msgid "Open a support issue"
+msgstr ""
+
+#: indicator.js:1000
+msgid "Could not open the support issue page"
+msgstr ""
+
+#: indicator.js:157
+msgid "Close"
+msgstr ""
+#: indicator.js
+msgid "This device (%s) belongs to a supported manufacturer, but it has not been explicitly confirmed as working yet. Please open a GitHub issue to confirm that it works, or to describe the problem that you are encountering, and share the data below."
+msgstr ""
+
+#: indicator.js
+msgid "Confirm device rendering"
+msgstr ""

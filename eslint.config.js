@@ -35,7 +35,9 @@ export default [
                 ngettext: 'readonly',
             },
             parserOptions: {
-                ecmaVersion: 2022,
+                // 'latest' for import attributes (`with {type: 'json'}`),
+                // used by the validated-devices JSON import.
+                ecmaVersion: 'latest',
                 sourceType: 'module',
             },
         },
