@@ -12,10 +12,10 @@ NVMe Monitor distinguishes two levels of device coverage:
 
 ## Tested devices (confirmed working)
 
-| Manufacturer | Model | Device path | Firmware | Fixture |
-|--------------|-------|-------------|----------|---------|
-| Samsung | SSD 970 EVO Plus 2TB | `/dev/nvme0n1` | 2B2QEXM7 | `samsung_ssd_970_evo_plus_2tb` |
-| Samsung | SSD 980 500GB | `/dev/nvme1n1` | 1B4QFXO7 | `samsung_ssd_980_500gb` |
+| Manufacturer | Model | Firmware | Fixture |
+|--------------|-------|----------|---------|
+| Samsung | SSD 970 EVO Plus 2TB | 2B2QEXM7 | `samsung_ssd_970_evo_plus_2tb` |
+| Samsung | SSD 980 500GB | 1B4QFXO7 | `samsung_ssd_980_500gb` |
 
 These are the only drives validated against real hardware so far.
 

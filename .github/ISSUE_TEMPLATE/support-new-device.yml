@@ -32,7 +32,7 @@ body:
 
         ```
         nvme list -o json
-        sudo nvme smart-log /dev/nvme0n1 -o json
+        sudo nvme smart-log [device_path] -o json
         ```
 
         **One ticket per device.** If several of your devices are
@@ -70,7 +70,7 @@ body:
   - type: textarea
     id: smart-log
     attributes:
-      label: "Output of `sudo nvme smart-log /dev/nvme0n1 -o json`"
+      label: "Output of `sudo nvme smart-log [device_path] -o json`"
       description: Full JSON output, copied from the extension's support dialog or from the command. This is the key data needed to add or verify support.
       render: json
       placeholder: |
