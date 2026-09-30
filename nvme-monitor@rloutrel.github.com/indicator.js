@@ -5,10 +5,13 @@
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
+import Cogl from 'gi://Cogl';
 import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 
 import {gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import {ModalDialog} from 'resource:///org/gnome/shell/ui/modalDialog.js';
 import {PopupBaseMenuItem, PopupMenuItem, PopupSwitchMenuItem, PopupSeparatorMenuItem, PopupMenuSection} from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -40,7 +43,27 @@ import {formatDiskUsageBytes, describeDiskUsageEntry, buildDiskUsageDetails} fro
 import {computeOverlayPosition} from './overlayGeometry.js';
 
 // Import the SMART parser
-import { parseSmart } from './smartParser.js';
+import { parseSmart, detectManufacturer, getSupportLevel, SUPPORTED_MANUFACTURERS } from './smartParser.js';
+// Validated-devices registry (ModelNumber -> manufacturer), loaded at
+// runtime because GJS in GNOME Shell 50 does not support JSON import
+// attributes. Falls back to an empty registry if the file is unreadable.
+function loadValidatedDevices() {
+    try {
+        const path = GLib.build_filenamev([
+            GLib.path_get_dirname(import.meta.url.replace('file://', '')),
+            'validatedDevices.json',
+        ]);
+        const [ok, bytes] = GLib.file_get_contents(path);
+        if (!ok)
+            return {};
+        return JSON.parse(new TextDecoder().decode(bytes));
+    } catch (e) {
+        _warn(`Failed to load validatedDevices.json: ${e}`);
+        return {};
+    }
+}
+const VALIDATED_DEVICES = loadValidatedDevices();
+
 // Import endurance value formatting + temperature tier color (pure, unit-tested)
 import { formatCompactNumber, formatDataUnits, formatPowerOnHours, COLOR_TRACK } from './format.js';
 // Import temperature line formatting (pure, unit-tested)
@@ -82,11 +105,134 @@ const SECTION_ICON_SIZE = 22;
 const VALUE_ICON_SIZE = 16;
 
 const PANEL_WARNING_CLASS = 'nvme-panel-warning';
+// Deep link to the "Support new device" GitHub issue template, preselected
+// so the user lands directly on the form to fill in.
+const SUPPORT_ISSUE_URL =
+    'https://github.com/rloutrel/gnome-extension-nvme-monitor/issues/new?template=support-new-device.yml';
+// Max characters of the SMART JSON shown in the support overlay before the
+// text is ellipsized; the full text is always copied to the clipboard.
+const SUPPORT_JSON_PREVIEW_CHARS = 1500;
 const DISK_USAGE_DEBUG_DIR = GLib.build_filenamev(
     [GLib.get_user_runtime_dir(), 'found_dev_path']);
 
 // Global fail counter for the uninstall-not-found loop (see v2flow.js).
 let _uninstallNotFoundCount = 0;
+
+// ---------------------------------------------------------------------------
+// Device support dialog: a classic GNOME Shell modal dialog for a device
+// whose manufacturer is not recognized. Unlike a transient overlay it holds
+// a modal grab, so clicks outside the dialog do not dismiss it; it closes
+// via the Close button or Escape. Shows the call to action, the supported
+// manufacturer list, the raw nvme list and smart-log JSON (each with a
+// copy-to-clipboard button), and the GitHub issue deep link.
+// ---------------------------------------------------------------------------
+export const DeviceSupportDialog = GObject.registerClass(
+    class DeviceSupportDialog extends ModalDialog {
+        _init({smartRaw, listRaw, modelNumber, supportLevel = 'report', createCopyableJsonBox, openSupportIssue, attachDrag = null}) {
+            super._init({styleClass: 'nvme-support-dialog', shellReactive: true}, true);
+            this.reactive = false;
+            this.dialogLayout.reactive = true;
+            this._createCopyableJsonBox = createCopyableJsonBox;
+            this._openSupportIssue = openSupportIssue;
+
+            const content = this.contentLayout;
+
+            // Full-width draggable header bar: title on the left, close
+            // button on the right. Pressing anywhere on the bar (except the
+            // close button) moves the dialog.
+            const headerBar = new St.BoxLayout({
+                style_class: 'nvme-support-dialog-headerbar',
+            });
+            const title = new St.Label({
+                text: supportLevel === 'confirm'
+                    ? _('Confirm device rendering')
+                    : _('Unknown device'),
+                style_class: 'nvme-support-dialog-title',
+                x_expand: true,
+            });
+            title.clutter_text.line_wrap = true;
+            headerBar.add_child(title);
+            const closeButton = new St.Button({
+                style_class: 'nvme-support-close-button',
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+            });
+            closeButton.set_child(new St.Label({text: '\u2715'}));
+            closeButton.set_accessible_name(_('Close'));
+            closeButton.connect('clicked', () => this.close());
+            headerBar.add_child(closeButton);
+            if (attachDrag)
+                attachDrag(headerBar, this.dialogLayout);
+            content.add_child(headerBar);
+
+            const introText = supportLevel === 'confirm'
+                ? _('This device (%s) belongs to a supported manufacturer, but '
+                    + 'it has not been explicitly confirmed as working yet. '
+                    + 'Please open a GitHub issue to confirm that it works, or '
+                    + 'to describe the problem that you are encountering, and '
+                    + 'share the data below.').format(modelNumber)
+                : _('This device (%s) has not been explicitly confirmed '
+                    + 'as working yet. Sharing the data below via a GitHub issue '
+                    + 'helps improve support for this model.').format(modelNumber);
+            const intro = new St.Label({
+                text: introText,
+                style_class: 'nvme-support-dialog-body',
+            });
+            intro.clutter_text.line_wrap = true;
+            content.add_child(intro);
+
+            const supported = new St.Label({
+                text: _('Supported manufacturers: %s')
+                    .format(SUPPORTED_MANUFACTURERS.join(', ')),
+                style_class: 'nvme-support-dialog-manufacturers',
+            });
+            supported.clutter_text.line_wrap = true;
+            content.add_child(supported);
+
+            const listTitle = new St.Label({
+                text: _('Output of nvme list:'),
+                style_class: 'nvme-support-json-title',
+            });
+            const smartTitle = new St.Label({
+                text: _('Output of nvme smart-log:'),
+                style_class: 'nvme-support-json-title',
+            });
+            const jsonText = smartRaw ? JSON.stringify(smartRaw, null, 2) : '';
+            content.add_child(this._createCopyableJsonBox(
+                listTitle, listRaw || '', 'nvme list -o json'));
+            content.add_child(this._createCopyableJsonBox(
+                smartTitle, jsonText, 'sudo nvme smart-log [device_path] -o json'));
+
+            this.setButtons([
+                {
+                    label: _('Close'),
+                    action: () => this.close(),
+                    key: Clutter.KEY_Escape,
+                    isDefault: true,
+                },
+                {
+                    label: _('Open a support issue'),
+                    action: () => this._openSupportIssue(),
+                    style_class: 'nvme-support-issue-button',
+                },
+            ]);
+        }
+
+        // Show the dialog without taking the modal grab, so the session
+        // stays interactive (the Shell is not blocked while it is open).
+        // close() still works: without a pushed modal it pops nothing and
+        // just fades out and destroys.
+        openNonModal() {
+            if (this.state === null || this.state === undefined)
+                return;
+            this._monitorConstraint.index = global.display.get_current_monitor();
+            this.show();
+            this.opacity = 255;
+            this._setState(0);
+        }
+    }
+);
 
 export const Indicator = GObject.registerClass(
     class Indicator extends PanelMenu.Button {
@@ -120,6 +266,10 @@ export const Indicator = GObject.registerClass(
             // Per-device fast (500ms) timers for drives in the critical/hot
             // (red) tier. Only the matching device's SMART is re-fetched.
             this._criticalTimers = {};
+            // Actors carrying a hover tooltip. Tracked so their transient
+            // tooltip labels can be destroyed without connecting a GC-unsafe
+            // ::destroy signal on the actor itself.
+            this._tooltipActors = [];
 
             // ---------------------------------------------------------------
             // Menu structure:
@@ -186,7 +336,8 @@ export const Indicator = GObject.registerClass(
             this._lastRefreshTime = 0;
             this._pollingTimer = null;
             this.menu.connect('open-state-changed', (menu, open) => {
-                if (open) this._refreshDevices();
+                if (open)
+                    this._refreshDevices();
             });
         }
 
@@ -288,6 +439,7 @@ export const Indicator = GObject.registerClass(
             if (this._cachedDevices !== null) {
                 return this._cachedDevices;
             }
+            this._cachedListJson = null;
 
             const nvmeBin = GLib.find_program_in_path('nvme');
             if (!nvmeBin) {
@@ -296,21 +448,28 @@ export const Indicator = GObject.registerClass(
             }
 
             const listResult = runCommandSync([nvmeBin, 'list', '-o', 'json']);
-            _debug(`nvme list: ok=${listResult.ok} exitCode=${listResult.exitCode} stdout_len=${listResult.stdout?.length || 0} stderr_len=${listResult.stderr?.length || 0}`);
             if (!listResult.ok || listResult.exitCode !== 0) {
                 _warn('Failed to list NVMe devices');
                 return null;
             }
 
+            // Some nvme-cli builds emit the JSON on stderr and leave stdout
+            // nearly empty; accept whichever stream carries the JSON.
+            const listJson = this._pickNvmeListJson(listResult);
+            if (listJson === null) {
+                _warn('nvme list: no JSON output on stdout or stderr');
+                _debug(`nvme list: raw stdout: ${listResult.stdout?.substring(0, 200) || '(empty)'}`);
+                _debug(`nvme list: raw stderr: ${listResult.stderr?.substring(0, 200) || '(empty)'}`);
+                return null;
+            }
             try {
-                const parsed = JSON.parse(listResult.stdout);
+                const parsed = JSON.parse(listJson);
                 this._cachedDevices = normalizeDeviceList(parsed);
+                this._cachedListJson = JSON.stringify(parsed, null, 2);
                 _debug(`nvme list: found ${this._cachedDevices.length} devices (cached)`);
                 return this._cachedDevices;
             } catch (e) {
                 _warn(`nvme list: JSON parse error: ${e.message}`);
-                _debug(`nvme list: raw stdout: ${listResult.stdout?.substring(0, 200) || '(empty)'}`);
-                _debug(`nvme list: raw stderr: ${listResult.stderr?.substring(0, 200) || '(empty)'}`);
                 return null;
             }
         }
@@ -326,6 +485,7 @@ export const Indicator = GObject.registerClass(
         _refreshDevices() {
             // Clear previous content and drop stale chart references; new
             // charts are re-registered as they are added below.
+            this._destroyHoverTooltips();
             this._devicesSection.removeAll();
             this._tempCharts = {};
             this._setPanelWarning(false);
@@ -381,6 +541,54 @@ export const Indicator = GObject.registerClass(
             this._syncCriticalTimers(criticalPaths);
         }
 
+        // Shared drag-to-move helper: while the pointer button is pressed on
+        // `handle`, `actor` follows the pointer via translation offsets. The
+        // motion is tracked on the stage so the drag keeps working even when
+        // the pointer leaves the handle (fixes the previous non-moving drag).
+        _attachDragHandler(handle, actor) {
+            let dragging = false;
+            let stageMotionId = 0;
+            let stageReleaseId = 0;
+            let startX = 0;
+            let startY = 0;
+            let baseX = 0;
+            let baseY = 0;
+            handle.reactive = true;
+            const endDrag = () => {
+                dragging = false;
+                if (stageMotionId) {
+                    global.stage.disconnect(stageMotionId);
+                    stageMotionId = 0;
+                }
+                if (stageReleaseId) {
+                    global.stage.disconnect(stageReleaseId);
+                    stageReleaseId = 0;
+                }
+            };
+            handle.connect('button-press-event', (_h, event) => {
+                if (dragging)
+                    return Clutter.EVENT_PROPAGATE;
+                dragging = true;
+                [startX, startY] = event.get_coords();
+                baseX = actor.translation_x;
+                baseY = actor.translation_y;
+                stageMotionId = global.stage.connect('motion-event', (_s, motionEvent) => {
+                    if (!dragging)
+                        return Clutter.EVENT_PROPAGATE;
+                    const [x, y] = motionEvent.get_coords();
+                    actor.translation_x = baseX + x - startX;
+                    actor.translation_y = baseY + y - startY;
+                    return Clutter.EVENT_PROPAGATE;
+                });
+                stageReleaseId = global.stage.connect('button-release-event', () => {
+                    if (dragging)
+                        endDrag();
+                    return Clutter.EVENT_PROPAGATE;
+                });
+                return Clutter.EVENT_PROPAGATE;
+            });
+        }
+
         // -------------------------------------------------------------------
         // Render a single device (header, meta, SMART info) into the device
         // section. On a successful SMART read the composite temperature is
@@ -417,8 +625,17 @@ export const Indicator = GObject.registerClass(
                 healthGauges = buildHealthGauges(parsedSmart, this._smartLabels());
             }
 
-            // Device header: icon + bold model name + health gauges
-            this._addDeviceHeader(dev.ModelNumber || dev.DevicePath, healthGauges);
+            // Device header: icon + bold model name + health gauges. The
+            // support "!" button opens the device-support call to action
+            // overlay: yellow when the manufacturer is supported but the
+            // exact model is not validated yet (ask to confirm the
+            // rendering), red when the device seems badly handled (ask to
+            // provide information).
+            const support = this._unknownDeviceSupport(parsedSmart, smartObj, dev, smartParseError);
+            this._addDeviceHeader(
+                dev.ModelNumber || dev.DevicePath,
+                healthGauges,
+                support);
 
             // Device path + firmware (dimmed), with the disk usage bar above it.
             const diskUsage = this._collectDiskUsageInfo(dev.DevicePath, lvmInfo);
@@ -456,6 +673,82 @@ export const Indicator = GObject.registerClass(
                 }
             }
             return false;
+        }
+
+        // -------------------------------------------------------------------
+        // Support payload for a device whose manufacturer could not be
+        // detected, or null when the manufacturer is known. Manufacturer
+        // detection also works without SMART data (smart-log stack not
+        // installed/enabled): it falls back to the model number from
+        // `nvme list`, so the dialog opens with the smart-log command in
+        // the text area instead of the output.
+        // -------------------------------------------------------------------
+        _unknownDeviceSupport(parsedSmart, smartRaw, dev, smartParseError = false) {
+            const manufacturer = parsedSmart
+                ? parsedSmart.manufacturer
+                : detectManufacturer(dev.ModelNumber || '');
+            const level = getSupportLevel(
+                dev.ModelNumber || '', manufacturer, smartParseError, VALIDATED_DEVICES);
+            if (level === 'validated')
+                return null;
+            let listRaw = this._cachedListJson;
+            if (!listRaw) {
+                listRaw = this._fetchListJson();
+            }
+            return {
+                smartRaw,
+                listRaw,
+                modelNumber: dev.ModelNumber || '',
+                supportLevel: level,
+            };
+        }
+
+        // -------------------------------------------------------------------
+        // Pick the `nvme list -o json` output stream that carries the JSON:
+        // stdout normally, but some nvme-cli builds emit the JSON on stderr
+        // (stdout then holds only a few whitespace bytes). Returns the raw
+        // JSON text, or null when neither stream parses.
+        // -------------------------------------------------------------------
+        _pickNvmeListJson(result) {
+            for (const stream of ['stdout', 'stderr']) {
+                const trimmed = (result[stream] || '').trim();
+                if (!trimmed) {
+                    continue;
+                }
+                try {
+                    JSON.parse(trimmed);
+                    return trimmed;
+                } catch {
+                    // Not JSON on this stream; try the next one.
+                }
+            }
+            return null;
+        }
+
+        // -------------------------------------------------------------------
+        // Run `nvme list -o json` and return the raw JSON text, or null on
+        // failure. Unlike the SMART log, this needs no polkit/pkexec, so it
+        // is used to (re)fill the cache on demand for the support overlay.
+        // -------------------------------------------------------------------
+        _fetchListJson() {
+            const nvmeBin = GLib.find_program_in_path('nvme');
+            if (!nvmeBin) {
+                _warn('support dialog: nvme binary not found in PATH');
+                return null;
+            }
+            const result = runCommandSync([nvmeBin, 'list', '-o', 'json']);
+            if (!result.ok || result.exitCode !== 0) {
+                _warn(`support dialog: nvme list failed: exit=${result.exitCode} stderr=${result.stderr?.substring(0, 200) || '(empty)'}`);
+                return null;
+            }
+            // Some nvme-cli builds emit the JSON on stderr; accept either.
+            const listJson = this._pickNvmeListJson(result);
+            if (listJson === null) {
+                _warn('support dialog: nvme list produced no JSON output');
+                return null;
+            }
+            this._cachedListJson = listJson;
+            return this._cachedListJson;
         }
 
         // -------------------------------------------------------------------
@@ -603,8 +896,11 @@ export const Indicator = GObject.registerClass(
         // -------------------------------------------------------------------
         // Add a device header line: icon + bold label, non-interactive.
         // -------------------------------------------------------------------
-        _addDeviceHeader(modelName, gauges = null) {
+        _addDeviceHeader(modelName, gauges = null, support = null) {
             const header = new PopupBaseMenuItem({ reactive: false, can_focus: false });
+
+            if (support)
+                header.add_child(this._createUnknownDeviceButton(support));
 
             if (this._deviceIcon) {
                 header.add_child(new St.Icon({
@@ -613,7 +909,7 @@ export const Indicator = GObject.registerClass(
                 }));
             }
 
-            const label = new St.Label({ text: modelName });
+            const label = new St.Label({ text: modelName, x_expand: true });
             label.add_style_class_name('nvme-device-header');
             header.add_child(label);
 
@@ -784,6 +1080,7 @@ export const Indicator = GObject.registerClass(
             actor.add_style_class_name('nvme-clickable');
             actor._partitionTooltip = null;
             actor._partitionEntry = null;
+            this._tooltipActors.push(actor);
 
             const hideTooltip = () => {
                 if (actor._partitionTooltip) {
@@ -827,7 +1124,6 @@ export const Indicator = GObject.registerClass(
                 hideTooltip();
                 return Clutter.EVENT_PROPAGATE;
             });
-            actor.connect('destroy', hideTooltip);
             actor.connect('button-press-event', () => {
                 const entry = this._diskUsageEntryAtPointer(actor, entries);
                 if (!entry) return Clutter.EVENT_PROPAGATE;
@@ -837,22 +1133,174 @@ export const Indicator = GObject.registerClass(
             });
         }
 
-        _createHelpButton(title, body) {
+        // -------------------------------------------------------------------
+        // Red "!" button shown next to a device whose manufacturer is unknown.
+        // Opens the device-support call to action overlay: the idea (add the
+        // missing manufacturer detection pattern), what the user can do
+        // (report the device), the SMART JSON to attach, the supported
+        // manufacturer list, and the GitHub issue deep link.
+        // -------------------------------------------------------------------
+        _createUnknownDeviceButton({smartRaw, listRaw, modelNumber, supportLevel}) {
             const button = new St.Button({
-                style_class: 'nvme-help-button',
+                style_class: 'nvme-support-button',
                 can_focus: true,
                 reactive: true,
                 track_hover: true,
             });
-            button.set_child(new St.Label({text: '?'}));
-            button.set_accessible_name(title);
+            if (supportLevel === 'confirm')
+                button.add_style_class_name('nvme-support-button-confirm');
+            button.set_child(new St.Label({text: '!'}));
+            button.set_accessible_name(_('Device support'));
             this._attachHelperCursor(button);
-            this._attachHoverTooltip(button, title);
+            this._attachHoverTooltip(button, _('Device support'));
             button.connect('clicked', () => {
-                this._showExplanationOverlay(button, title, body);
+                this.menu.close();
+                this._showDeviceSupportDialog({smartRaw, listRaw, modelNumber, supportLevel});
             });
             return button;
         }
+
+        // -------------------------------------------------------------------
+        // Open the device-support dialog: a real modal Shell dialog (not a
+        // transient overlay), so a stray click does not dismiss it; it grabs
+        // the pointer/keyboard until Closed or Escape.
+        // -------------------------------------------------------------------
+        _showDeviceSupportDialog({smartRaw, listRaw, modelNumber, supportLevel}) {
+            if (this._supportDialog) {
+                this._supportDialog.close();
+            }
+            const dialog = new DeviceSupportDialog({
+                smartRaw,
+                listRaw,
+                modelNumber,
+                supportLevel,
+                createCopyableJsonBox: (title, text, command) =>
+                    this._createCopyableJsonBox(title, text, command),
+                openSupportIssue: () => this._openSupportIssue(),
+                attachDrag: (handle, movedActor) => this._attachDragHandler(handle, movedActor),
+            });
+            dialog.openNonModal();
+            this._supportDialog = dialog;
+        }
+
+        // -------------------------------------------------------------------
+        // A JSON text box for the support dialog: a monospace, 10-line-tall
+        // scrollable body with selectable text and a small clipboard-icon
+        // copy button at its top right corner. `title` is the caption above
+        // the text.
+        // -------------------------------------------------------------------
+        _createCopyableJsonBox(title, jsonText, command = null) {
+            const frame = new St.BoxLayout({
+                vertical: true,
+                style_class: 'nvme-support-json-frame',
+            });
+            const header = new St.BoxLayout({ style_class: 'nvme-support-json-header' });
+            const titleLabel = title;
+            header.add_child(titleLabel);
+            const copyButton = new St.Button({
+                style_class: 'nvme-support-copy-button',
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+            });
+            copyButton.set_child(new St.Icon({
+                gicon: this._loadMenuIconByName(ICONS.Clipboard),
+                icon_size: VALUE_ICON_SIZE,
+            }));
+            copyButton.set_accessible_name(_('Copy to clipboard'));
+            this._attachHelperCursor(copyButton);
+            this._attachHoverTooltip(copyButton, _('Copy to clipboard'));
+            copyButton.connect('clicked', () => {
+                const clipboard = St.Clipboard.get_default();
+                clipboard.set_text(St.ClipboardType.CLIPBOARD,
+                    jsonText.length > 0 ? jsonText : (command || ''));
+                this._showCopiedFeedback(copyButton);
+            });
+            header.add_child(copyButton);
+            const missing = jsonText.length === 0;
+            let hint = null;
+            if (missing && command) {
+                hint = new St.Label({
+                    text: _('The output could not be collected automatically. '
+                        + 'Run the command below in a terminal, then paste the '
+                        + 'result in the issue.'),
+                    style_class: 'nvme-support-json-hint',
+                });
+                hint.clutter_text.line_wrap = true;
+            }
+            const bodyLabel = new St.Label({
+                text: missing
+                    ? (command || '')
+                    : (jsonText.length > SUPPORT_JSON_PREVIEW_CHARS
+                        ? `${jsonText.slice(0, SUPPORT_JSON_PREVIEW_CHARS)}\u2026`
+                        : jsonText),
+                style_class: 'nvme-support-json',
+            });
+            bodyLabel.reactive = true;
+            const text = bodyLabel.clutter_text;
+            text.reactive = true;
+            text.line_wrap = false;
+            text.editable = false;
+            text.selectable = true;
+            text.single_line_mode = false;
+            // Selection colors: the default highlight is white-on-white on
+            // the black area, leaving the selected text unreadable. Use a
+            // light gray highlight with black text so the selection stays
+            // legible in the JSON boxes.
+            const selBg = new Cogl.Color({red: 211, green: 211, blue: 211, alpha: 255});
+            const selText = new Cogl.Color({red: 0, green: 0, blue: 0, alpha: 255});
+            text.selection_background_color = selBg;
+            text.selected_text_color = selText;
+            // St.ScrollView requires a StScrollable child; St.Label is not
+            // one, so wrap the label in a vertical St.BoxLayout (the same
+            // pattern GNOME Shell uses for its own scroll views).
+            const content = new St.BoxLayout({
+                vertical: true,
+                style_class: 'nvme-support-json-content',
+            });
+            content.add_child(bodyLabel);
+            const scrollView = new St.ScrollView({
+                style_class: 'nvme-support-json-scroll',
+                overlay_scrollbars: false,
+                hscrollbar_policy: St.PolicyType.AUTOMATIC,
+                vscrollbar_policy: St.PolicyType.AUTOMATIC,
+            });
+            scrollView.set_child(content);
+            frame.add_child(header);
+            if (hint)
+                frame.add_child(hint);
+            frame.add_child(scrollView);
+            return frame;
+        }
+
+        _showCopiedFeedback(copyButton) {
+            const tooltip = new St.Label({
+                text: _('Copied!'),
+                style_class: 'nvme-hover-tooltip',
+            });
+            Main.uiGroup.add_child(tooltip);
+            const [bx, by] = copyButton.get_transformed_position();
+            const [bw, bh] = copyButton.get_size();
+            const [, tw] = tooltip.get_preferred_width(-1);
+            tooltip.set_position(bx + bw / 2 - tw / 2, by - bh - 8);
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1200, () => {
+                tooltip.destroy();
+                return GLib.SOURCE_REMOVE;
+            });
+        }
+
+        _openSupportIssue() {
+            try {
+                Gio.AppInfo.launch_default_for_uri(SUPPORT_ISSUE_URL, null);
+            } catch (e) {
+                _warn(`failed to open support issue URL: ${e}`);
+                notifyError(
+                    _('Could not open the support issue page'),
+                    SUPPORT_ISSUE_URL);
+            }
+        }
+
+
 
         // -------------------------------------------------------------------
         // Load a bundled icon by name from icons/bootstrap/ as a GIcon.
@@ -985,8 +1433,8 @@ export const Indicator = GObject.registerClass(
 
             const enterId = actor.connect('enter-event', () => _showTooltip(actor));
             const leaveId = actor.connect('leave-event', () => _hideTooltip(actor));
-            const destroyId = actor.connect('destroy', () => _hideTooltip(actor));
-            actor._nvmeTooltipHandlers = [enterId, leaveId, destroyId];
+            actor._nvmeTooltipHandlers = [enterId, leaveId];
+            this._tooltipActors.push(actor);
         }
 
         // -------------------------------------------------------------------
@@ -1125,6 +1573,20 @@ export const Indicator = GObject.registerClass(
                 }
                 return Clutter.EVENT_PROPAGATE;
             });
+        }
+
+        _destroyHoverTooltips() {
+            for (const actor of this._tooltipActors) {
+                if (actor._nvmeTooltip) {
+                    actor._nvmeTooltip.destroy();
+                    actor._nvmeTooltip = null;
+                }
+                if (actor._partitionTooltip) {
+                    actor._partitionTooltip.destroy();
+                    actor._partitionTooltip = null;
+                }
+            }
+            this._tooltipActors = [];
         }
 
         _hideExplanationOverlay() {
@@ -1441,6 +1903,7 @@ export const Indicator = GObject.registerClass(
         }
 
         destroy() {
+            this._destroyHoverTooltips();
             this._hideExplanationOverlay();
             this._stopAllCriticalTimers();
             this._stopPolling();

@@ -180,3 +180,131 @@
     background-color: rgba(255, 255, 255, 0.1);
     border-radius: 4px;
 }
+
+/* Red "!" support button next to a device with an unknown manufacturer.
+ * Matches the panel-warning red used elsewhere in the extension. */
+.nvme-support-button {
+    min-width: 18px;
+    min-height: 18px;
+    padding: 0;
+    border-radius: 9px;
+    font-weight: bold;
+    background-color: #8b1e24;
+    color: #ffffff;
+}
+
+.nvme-support-button:hover,
+.nvme-support-button:focus {
+    background-color: #b3252d;
+}
+
+/* Supported manufacturer, model not validated yet: ask to confirm
+   the rendering (yellow instead of red). */
+.nvme-support-button-confirm {
+    background-color: #b58b00;
+    color: #000000;
+}
+
+.nvme-support-button-confirm:hover,
+.nvme-support-button-confirm:focus {
+    background-color: #e0aa00;
+}
+
+/* Device support modal dialog. */
+.nvme-support-dialog {
+    width: 480px;
+}
+
+.nvme-support-dialog-title {
+    font-weight: bold;
+    font-size: 1.15em;
+}
+
+.nvme-support-dialog-body {
+    font-size: 0.95em;
+}
+
+.nvme-support-dialog-manufacturers {
+    font-size: 0.9em;
+    opacity: 0.7;
+}
+
+.nvme-support-json-frame {
+    spacing: 2px;
+}
+
+.nvme-support-json-header {
+    x-expand: true;
+}
+
+.nvme-support-json-title {
+    font-size: 0.9em;
+    font-weight: bold;
+    x-expand: true;
+}
+
+.nvme-support-json-scroll {
+    height: 10em;
+}
+
+.nvme-support-json {
+    font-family: monospace;
+    font-size: 0.85em;
+    background-color: #000000;
+    color: #ffffff;
+    border-radius: 6px;
+    padding: 8px;
+}
+
+.nvme-support-copy-button,
+.nvme-support-issue-button {
+    border-radius: 6px;
+}
+
+.nvme-support-copy-button {
+    padding: 2px;
+}
+
+.nvme-support-copy-button:hover,
+.nvme-support-copy-button:focus {
+    background-color: rgba(128, 128, 128, 0.6);
+}
+
+.nvme-support-issue-button {
+    padding: 4px 10px;
+    background-color: #8b1e24;
+    color: #ffffff;
+}
+
+.nvme-support-issue-button:hover,
+.nvme-support-issue-button:focus {
+    background-color: #b3252d;
+}
+
+/* Italic hint between the JSON box title and the area, shown when the
+ * output could not be collected automatically. */
+.nvme-support-json-hint {
+    font-style: italic;
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+/* Draggable header bar of the support dialog: title left, close right.
+   The whole bar is the drag handle. */
+.nvme-support-dialog-headerbar {
+    cursor: grab;
+    spacing: 8px;
+    margin-bottom: 8px;
+}
+
+.nvme-support-close-button {
+    min-width: 24px;
+    min-height: 24px;
+    border-radius: 12px;
+    padding: 2px 6px;
+}
+
+.nvme-support-close-button:hover,
+.nvme-support-close-button:focus {
+    background-color: rgba(255, 255, 255, 0.15);
+}
