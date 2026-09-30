@@ -139,41 +139,54 @@ pkexec /usr/local/bin/nvme-smart-uninstall.sh
 ```
 nvme-monitor@rloutrel.github.com/
   extension.js        # GNOME Shell entry point: enable/disable lifecycle only
-  indicator.js       # Panel indicator: menu, device rendering, polling,
+  indicator.js        # Panel indicator: menu, device rendering, polling,
                       #   temp history capture, adaptive refresh
-  tempChart.js       # Temperature line graph (St.DrawingArea + Cairo)
-  subprocess.js      # GJS subprocess/pkexec helpers, nvme-cli version check
-  logger.js          # Unified debug/warn/error + notification helpers
-  icons.js           # Bundled icon registry + Gio.FileIcon helper
-  smartParser.js      # SMART log parsing (vendor parsers), pure module
-  tempFormat.js        # Temperature line formatting, pure module
-  versionUtils.js      # nvme-cli version detection, pure module
-  deviceList.js        # normalize nvme list -o json layouts, pure module
+  tempChart.js        # Temperature line graph (St.DrawingArea + Cairo)
+  subprocess.js       # GJS subprocess/pkexec helpers, nvme-cli version check
+  logger.js           # Unified debug/warn/error + notification helpers
+  icons.js            # Bundled icon registry + Gio.FileIcon helper
+  prefs.js             # Preferences window (separate GTK4/Adwaita process)
+  smartParser.js       # SMART log parsing (vendor parsers), pure module
+  smartStatus.js       # SMART health gauges + status line, pure module
+  tempFormat.js       # Temperature line formatting, pure module
+  tempTiers.js        # Temperature tier resolution (icon, style), pure module
+  tempUnit.js          # Temperature unit handling, pure module
   tempHistory.js       # rolling per-device temperature history (10 minutes,
                       #   min/max range), pure module
+  versionUtils.js      # nvme-cli version detection, pure module
+  deviceList.js        # normalize nvme list -o json layouts, pure module
   format.js            # endurance formatting + temperature tier color, pure
+  usageFormatting.js   # disk usage display helpers, pure module
+  diskDiscovery.js     # filesystem/LVM usage collection (df, pvs, lvs)
+  diskUsage.js         # disk usage bar rendering (St widgets)
+  diskUsageModel.js   # df output parsing + device-path helpers, pure module
+  lvmReport.js         # LVM pvs/lvs JSON report parsing, pure module
+  overlayGeometry.js   # overlay/tooltip positioning inside a monitor, pure
+                      #   module
+  polkitManager.js     # polkit stack state management, pure module
+  v2decisions.js       # v2 polkit stack decision logic, pure module
+  v2flow.js            # v2 polkit install/uninstall flow orchestration
   stylesheet.css       # Theme-aware styles
   metadata.json        # Shell version, UUID, version
   setup-polkit.sh      # Installs the polkit + wrapper stack (run as root)
+  schemas/             # GSettings schema
   icons/bootstrap/     # Bundled SVG icons (Bootstrap Icons, MIT)
+  po/                  # Translations (gettext)
   test/                # Unit tests (Node built-in runner)
 screenshots/           # Screenshots referenced by this README
 ```
 
 ## Testing
 
-Pure modules (`smartParser.js`, `tempFormat.js`, `versionUtils.js`,
-`deviceList.js`, `tempHistory.js`, `format.js`) are unit-tested with Node's
-built-in test runner — no test framework, no dependencies:
+Pure modules (`smartParser.js`, `smartStatus.js`, `tempFormat.js`,
+`tempTiers.js`, `tempUnit.js`, `tempHistory.js`, `versionUtils.js`,
+`deviceList.js`, `format.js`, `usageFormatting.js`, `diskUsageModel.js`,
+`lvmReport.js`, `overlayGeometry.js`, `polkitManager.js`, `v2decisions.js`)
+are unit-tested with Node's built-in test runner — no test framework, no
+dependencies:
 
 ```bash
-node --test \
-  "nvme-monitor@rloutrel.github.com/test/tempFormat.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/smartParser.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/versionUtils.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/deviceList.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/format.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/tempHistory.test.js"
+node --test "nvme-monitor@rloutrel.github.com/test/"*.test.js
 ```
 
 `extension.js` and `indicator.js` run inside GNOME Shell (GJS) and cannot be unit-tested
