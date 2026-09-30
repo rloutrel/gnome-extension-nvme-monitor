@@ -418,11 +418,14 @@ export function parseSmart(raw, modelHint = null) {
  * Support level for a device, based on the validated-devices registry.
  *
  * Levels:
- *  - 'validated': the exact ModelNumber is in the registry (fully tested,
- *    no support button).
- *  - 'confirm': the manufacturer is supported but the exact model is not
- *    validated yet; rendering is expected to work — ask the user to
- *    confirm it looks right (yellow "!").
+ *  - 'validated': the exact ModelNumber is in the registry and this
+ *    hardware revision (matched by controller PCI device ID when the
+ *    entry carries per-revision data) is confirmed working on real
+ *    hardware (no support button).
+ *  - 'confirm': the manufacturer is supported but the exact model — or,
+ *    for revision-aware entries, this hardware revision — is not
+ *    confirmed working yet; rendering is expected to work — ask the
+ *    user to confirm it looks right (yellow "!").
  *  - 'report': unknown manufacturer or SMART parsing problem; ask the user
  *    to provide the raw data (red "!").
  *
@@ -431,15 +434,28 @@ export function parseSmart(raw, modelHint = null) {
  * @param {boolean} parseProblem - True when SMART parsing failed or the
  *   expected parser could not be applied
  * @param {Object} validated - Validated-devices registry
- *   (ModelNumber -> {manufacturer})
+ *   (ModelNumber -> {manufacturer, confirmed?, latestFirmware?,
+ *   revisions?: [{pciDeviceId, confirmed, latestFirmware}]})
+ * @param {string} [pciDeviceId] - Controller PCI device ID (e.g. '0xa808'),
+ *   used to select the hardware revision when the entry carries a
+ *   `revisions` array. Legacy single-string entries ignore it.
  * @returns {string} 'validated' | 'confirm' | 'report'
  */
-export function getSupportLevel(modelNumber, manufacturer, parseProblem, validated) {
+export function getSupportLevel(modelNumber, manufacturer, parseProblem, validated, pciDeviceId) {
     if (parseProblem)
         return 'report';
     const entry = validated[String(modelNumber || '').trim()];
-    if (entry && entry.manufacturer)
-        return 'validated';
+    if (entry && entry.manufacturer) {
+        if (Array.isArray(entry.revisions) && entry.revisions.length > 0) {
+            const rev = entry.revisions.find(r =>
+                r && typeof r === 'object' &&
+                String(r.pciDeviceId || '').trim().toLowerCase() ===
+                    String(pciDeviceId || '').trim().toLowerCase());
+            return rev && rev.confirmed === true ? 'validated' : 'confirm';
+        }
+        if (entry.confirmed === true)
+            return 'validated';
+    }
     const detected = String(manufacturer || '').toLowerCase();
     if (detected && detected !== 'unknown' &&
         SUPPORTED_MANUFACTURERS.some(m => m.toLowerCase() === detected))

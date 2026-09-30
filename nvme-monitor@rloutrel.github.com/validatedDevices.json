@@ -1,8 +1,22 @@
 {
     "Samsung SSD 970 EVO Plus 2TB": {
-        "manufacturer": "Samsung"
+        "manufacturer": "Samsung",
+        "revisions": [
+            {
+                "pciDeviceId": "0xa808",
+                "confirmed": true,
+                "latestFirmware": "2B2QEXM7"
+            }
+        ]
     },
     "Samsung SSD 980 500GB": {
-        "manufacturer": "Samsung"
+        "manufacturer": "Samsung",
+        "revisions": [
+            {
+                "pciDeviceId": "0xa809",
+                "confirmed": true,
+                "latestFirmware": "1B4QFXO7"
+            }
+        ]
     }
 }

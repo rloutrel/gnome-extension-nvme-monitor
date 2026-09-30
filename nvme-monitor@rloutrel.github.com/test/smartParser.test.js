@@ -202,10 +202,55 @@ test('detectManufacturer works from the model number alone (no SMART data)', () 
     assert.equal(detectManufacturer(null), 'Unknown');
 });
 
-test('getSupportLevel: validated model has no support button', () => {
+test('getSupportLevel: confirmed registry model has no support button', () => {
+    assert.equal(
+        getSupportLevel('Samsung SSD 970 EVO Plus 2TB', 'Samsung', false, VALIDATED_DEVICES, '0xa808'),
+        'validated');
+    assert.equal(
+        getSupportLevel('Samsung SSD 980 500GB', 'Samsung', false, VALIDATED_DEVICES, '0xa809'),
+        'validated');
+});
+
+test('getSupportLevel: known model with unregistered revision keeps the confirm sign', () => {
+    // Samsung ships several hardware revisions under the same ModelNumber;
+    // a revision missing from the registry must not be treated as validated.
+    assert.equal(
+        getSupportLevel('Samsung SSD 970 EVO Plus 2TB', 'Samsung', false, VALIDATED_DEVICES, '0xa80a'),
+        'confirm');
+    assert.equal(
+        getSupportLevel('Samsung SSD 970 EVO Plus 2TB', 'Samsung', false, VALIDATED_DEVICES, ''),
+        'confirm');
     assert.equal(
         getSupportLevel('Samsung SSD 970 EVO Plus 2TB', 'Samsung', false, VALIDATED_DEVICES),
-        'validated');
+        'confirm');
+});
+
+test('getSupportLevel: known but unconfirmed model keeps the confirm sign', () => {
+    const registry = {
+        ...VALIDATED_DEVICES,
+        'Samsung SSD 870 EVO 1TB': {
+            manufacturer: 'Samsung',
+            confirmed: false,
+        },
+        'Samsung SSD 990 PRO 1TB': {
+            manufacturer: 'Samsung',
+        },
+        'Samsung SSD 860 EVO 1TB': {
+            manufacturer: 'Samsung',
+            revisions: [
+                {pciDeviceId: '0xa808', confirmed: false, latestFirmware: '3B6Q'},
+            ],
+        },
+    };
+    assert.equal(
+        getSupportLevel('Samsung SSD 870 EVO 1TB', 'Samsung', false, registry),
+        'confirm');
+    assert.equal(
+        getSupportLevel('Samsung SSD 990 PRO 1TB', 'Samsung', false, registry),
+        'confirm');
+    assert.equal(
+        getSupportLevel('Samsung SSD 860 EVO 1TB', 'Samsung', false, registry, '0xa808'),
+        'confirm');
 });
 
 test('getSupportLevel: supported manufacturer, unvalidated model asks to confirm', () => {
@@ -247,27 +292,32 @@ const VALIDATED_FIXTURES = {
     },
 };
 
-test('validated-devices registry: every device has a fixture with a typical JSON body', () => {
-    const registered = Object.keys(VALIDATED_DEVICES);
-    assert.ok(registered.length > 0, 'registry is empty');
-    for (const model of registered) {
+test('validated-devices registry: every model with a confirmed revision has a fixture with a typical JSON body', () => {
+    const confirmed = Object.entries(VALIDATED_DEVICES)
+        .filter(([, entry]) => Array.isArray(entry.revisions) &&
+            entry.revisions.some(rev => rev.confirmed === true))
+        .map(([model]) => model);
+    assert.ok(confirmed.length > 0, 'registry has no confirmed revision');
+    for (const model of confirmed) {
         const fixture = VALIDATED_FIXTURES[model];
-        assert.ok(fixture, `no smartParser fixture for validated device "${model}"`);
+        assert.ok(fixture, `no smartParser fixture for confirmed device "${model}"`);
         assert.ok(Object.keys(fixture.raw).length > 0,
             `fixture for "${model}" has no JSON body`);
     }
 });
 
-test('validated-devices registry: every device keeps parsing without errors', () => {
+test('validated-devices registry: every device with a fixture keeps parsing without errors', () => {
     for (const [model, entry] of Object.entries(VALIDATED_DEVICES)) {
         const fixture = VALIDATED_FIXTURES[model];
+        if (!fixture)
+            continue;
         const smart = parseSmart(fixture.raw, fixture.model);
         assert.equal(smart.manufacturer, entry.manufacturer,
-            `validated device "${model}" no longer parses as ${entry.manufacturer}`);
+            `device "${model}" no longer parses as ${entry.manufacturer}`);
         assert.notEqual(smart.manufacturer, 'Unknown',
-            `validated device "${model}" parses as Unknown`);
+            `device "${model}" parses as Unknown`);
         assert.ok(smart.temperature.composite !== null && smart.temperature.composite !== undefined,
-            `validated device "${model}" has no composite temperature`);
+            `device "${model}" has no composite temperature`);
     }
 });
 
