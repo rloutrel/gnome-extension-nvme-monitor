@@ -25,19 +25,25 @@ body:
         from the tested models — the data below lets us add your exact
         drive to the test fixtures.
 
-        Run the following commands and paste the full JSON output below
+        **How to get the data:** if the extension's support dialog shows the
+        outputs, copy them from there (the copy buttons). Otherwise run
+        the commands below in a terminal and paste the full JSON output
         (you may redact serial numbers):
 
         ```
-        sudo nvme smart-log /dev/nvme0n1 -o json
         nvme list -o json
+        sudo nvme smart-log /dev/nvme0n1 -o json
         ```
+
+        **One ticket per device.** If several of your devices are
+        affected, please open a separate ticket for each one — each model
+        gets its own detection pattern and test fixture.
 
   - type: input
     id: device-model
     attributes:
       label: Device model
-      description: The `ModelNumber` from `nvme list -o json` (or the drive label).
+      description: The `ModelNumber` from `nvme list -o json` (or the drive label). One device per ticket.
       placeholder: e.g. "SAMSUNG MZVL2512HCJQ-00B00"
     validations:
       required: true
@@ -64,8 +70,8 @@ body:
   - type: textarea
     id: smart-log
     attributes:
-      label: "Output of `nvme smart-log -o json`"
-      description: Full JSON output. This is the key data needed to add or verify support.
+      label: "Output of `sudo nvme smart-log /dev/nvme0n1 -o json`"
+      description: Full JSON output, copied from the extension's support dialog or from the command. This is the key data needed to add or verify support.
       render: json
       placeholder: |
         {
@@ -83,7 +89,7 @@ body:
     id: device-list
     attributes:
       label: "Output of `nvme list -o json`"
-      description: Confirms the `ModelNumber` string used for detection. You may redact the serial number.
+      description: Confirms the `ModelNumber` string used for detection. Copy it from the extension's support dialog or run the command. You may redact the serial number.
       render: json
     validations:
       required: true
