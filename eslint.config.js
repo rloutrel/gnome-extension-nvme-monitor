@@ -159,6 +159,16 @@ export default [
         },
     },
     {
+        // Node CLI tools (firmware-page scraper), not GNOME Shell code.
+        files: ['nvme-monitor@rloutrel.github.com/tools/**/*.mjs'],
+        languageOptions: {
+            globals: {
+                process: 'readonly',
+                fetch: 'readonly',
+            },
+        },
+    },
+    {
         ignores: [
             'node_modules/',
         ],

@@ -1285,7 +1285,7 @@ export const Indicator = GObject.registerClass(
             }
             const result = runCommandSync([lspciBin, '-nn']);
             if (!result.ok || result.exitCode !== 0) {
-                _warn(`support dialog: lspci failed: exit=${result.exitCode} stderr=${result.stderr?.substring(0, 200) || '(empty)'}`);
+                _warn(`support dialog: lspci failed: exit=${result.exitCode} stderr=${result.stderr.substring(0, 200) || '(empty)'}`);
                 return null;
             }
             const pciAddress = readPciAddress(devicePath);

@@ -31,6 +31,10 @@ nvme-monitor@rloutrel.github.com/
   smartParser.js       # PURE: SMART log parsing. BaseParser + vendor parsers
                        #   (Samsung, WD, Micron, Crucial, SKHynix, Intel).
                        #   getParser() factory + parseSmart() convenience.
+  firmwareRegistry.js  # PURE: last-known-firmware lookup from the
+                       #   validated-devices registry, per hardware
+                       #   revision (matched by controller PCI device ID).
+                       #   getLatestFirmware() + assessFirmware().
   tempFormat.js         # PURE: temperature line formatting (French comma,
                        #   vendor sensor labels). formatTempCelsius,
                        #   formatTemperatureLine, formatSensorRows.
@@ -47,13 +51,18 @@ nvme-monitor@rloutrel.github.com/
   metadata.json         # Shell version, UUID, version.
   icons/bootstrap/      # Bundled SVG icons (Bootstrap Icons, MIT).
   test/                 # Unit tests (Node built-in runner).
+  tools/                # Node CLI tools: Samsung firmware-page scraper
+                       #   that refreshes validatedDevices.json (dry run
+                       #   by default; multi-revision models always go
+                       #   to manual review).
 ```
 
 ### Pure vs GJS modules
 
 A hard rule: **`smartParser.js`, `tempFormat.js`, `versionUtils.js`,
 `deviceList.js`, `tempHistory.js`, `tempUnit.js`, `polkitManager.js`,
-`tempTiers.js`, `usageFormatting.js`, and `overlayGeometry.js` are pure
+`tempTiers.js`, `usageFormatting.js`, `overlayGeometry.js`, and
+`firmwareRegistry.js` are pure
 modules with zero GJS/GObject
 imports.** They run under plain Node and are unit-tested there. Do **not** add `gi://` or
 `resource:///` imports to these files. Anything that touches `Gio`, `GLib`,
