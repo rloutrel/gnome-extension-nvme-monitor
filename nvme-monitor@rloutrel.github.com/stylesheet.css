@@ -231,6 +231,7 @@
 
 .nvme-support-json-frame {
     spacing: 2px;
+    margin-top: 6px;
 }
 
 .nvme-support-json-header {
@@ -289,6 +290,23 @@
     opacity: 0.7;
 }
 
+/* Multi-line text area of the setup-script dialog, where the user pastes
+ * setup-polkit.sh copied from the GitHub repository. Monospace on the same
+ * dark surface as the JSON boxes, tall enough for a whole script. */
+.nvme-setup-script-entry {
+    font-family: monospace;
+    font-size: 0.85em;
+    background-color: #000000;
+    color: #ffffff;
+    border-radius: 6px;
+    padding: 8px;
+}
+
+.nvme-setup-script-scroll {
+    height: 14em;
+    width: 440px;
+}
+
 /* Draggable header bar of the support dialog: title left, close right.
    The whole bar is the drag handle. */
 .nvme-support-dialog-headerbar {
@@ -307,4 +325,86 @@
 .nvme-support-close-button:hover,
 .nvme-support-close-button:focus {
     background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* One-line status label of the setup-script dialog: verification result
+   and running steps. Small and bold; green when the checksum is
+   verified, dark red on failure. */
+.nvme-setup-status {
+    font-size: 0.8em;
+    font-weight: bold;
+    opacity: 0.9;
+}
+.nvme-setup-status-ok {
+    color: #1e6b34;
+}
+.nvme-setup-status-error {
+    color: #8b1e24;
+}
+
+/* Scrollable disclaimer of the setup-script dialog: capped at 10 lines
+   so the dialog stays compact. */
+.nvme-setup-disclaimer-scroll {
+    height: 10em;
+}
+
+/* Clickable external-open icon next to the script location. */
+.nvme-setup-script-link {
+    border-radius: 6px;
+    padding: 2px;
+}
+.nvme-setup-script-link:hover,
+.nvme-setup-script-link:focus {
+    background-color: rgba(128, 128, 128, 0.4);
+}
+
+.nvme-setup-script-link-box {
+    spacing: 4px;
+}
+
+/* Residual-risk caveat at the end of the setup disclaimer: set apart
+   on its own lines, smaller and bold. */
+.nvme-setup-disclaimer-caveat {
+    font-size: 0.85em;
+    font-weight: bold;
+    margin-top: 8px;
+}
+
+/* Tabbed info area of the setup-script dialog: one of "Your action is
+   required" / "FAQ" is visible at a time. */
+.nvme-setup-tab-row {
+    spacing: 4px;
+    margin-top: 4px;
+}
+
+.nvme-setup-tab {
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-weight: bold;
+    font-size: 0.9em;
+}
+
+.nvme-setup-tab:hover,
+.nvme-setup-tab:focus {
+    background-color: rgba(128, 128, 128, 0.4);
+}
+
+.nvme-setup-tab-active {
+    background-color: rgba(128, 128, 128, 0.25);
+}
+
+.nvme-setup-faq-box {
+    spacing: 2px;
+    margin-top: 2px;
+}
+
+.nvme-setup-faq-question {
+    font-weight: bold;
+    font-size: 0.9em;
+    margin-top: 4px;
+}
+
+.nvme-setup-faq-answer {
+    font-size: 0.85em;
+    opacity: 0.9;
 }

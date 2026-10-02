@@ -32,8 +32,8 @@ export const ICONS = Object.freeze({
     VectorPenDark: 'vector-pen-dark',
     Gear: 'gear',
     GearDark: 'gear-dark',
-    Clipboard: 'clipboard',
-    ClipboardDark: 'clipboard-dark',
+    BoxArrowUpRight: 'box-arrow-up-right',
+    BoxArrowUpRightDark: 'box-arrow-up-right-dark',
     PanelFallback: 'drive-harddisk-symbolic',
 });
 
@@ -51,7 +51,7 @@ export const DARK_ICON_VARIANTS = Object.freeze({
     [ICONS.Eyeglasses]: ICONS.EyeglassesDark,
     [ICONS.VectorPen]: ICONS.VectorPenDark,
     [ICONS.Gear]: ICONS.GearDark,
-    [ICONS.Clipboard]: ICONS.ClipboardDark,
+    [ICONS.BoxArrowUpRight]: ICONS.BoxArrowUpRightDark,
 });
 
 // Build a Gio.FileIcon from an absolute path, or null if the file is missing.

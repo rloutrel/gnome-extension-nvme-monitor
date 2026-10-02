@@ -24,7 +24,6 @@ export default class IndicatorExampleExtension extends Extension {
             openPreferences: () => this.openPreferences(),
         });
         this._indicator._setupIcon();
-        this._indicator._checkSetupScript();
         // Restore the persisted rolling temperature history from /tmp so a
         // restart keeps the recent 30-minute curve.
         this._indicator._loadTempHistory();

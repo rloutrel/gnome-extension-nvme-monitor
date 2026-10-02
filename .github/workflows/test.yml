@@ -24,7 +24,7 @@ jobs:
         run: |
           find "nvme-monitor@rloutrel.github.com" -name "*.js" -not -path "*/test/*" -print0 | xargs -0 -n1 node --check
       - name: Shell lint
-        run: shellcheck "nvme-monitor@rloutrel.github.com/setup-polkit.sh"
+        run: shellcheck "setup-polkit.sh"
       - name: Validate metadata
         run: node "nvme-monitor@rloutrel.github.com/test/validateMetadata.js"
       - name: Unit tests

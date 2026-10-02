@@ -101,10 +101,37 @@ Install `nvme-cli` from your distribution:
 
 Until the polkit stack is installed, the extension can still list devices
 (from `nvme list`) but cannot read SMART logs, and shows an
-**“Install NVMe Stack for SMART data”** entry in the menu.
+**“Install the NVMe SMART stack”** entry in the menu.
 
-To enable SMART data, toggle **Service Setup** in the extension menu. This
-runs `setup-polkit.sh` once as root (via `pkexec`), which:
+To enable SMART data, toggle **Use NVMe SMART access** in the extension
+menu. For security reasons the setup is not 100% automatic: the
+extension never executes a script from the local extension directory as
+root (anything able to write there would then gain root privileges). Instead,
+the toggle opens a dialog that:
+
+1. downloads [`setup-polkit.sh`](https://github.com/rloutrel/gnome-extension-nvme-monitor/blob/main/setup-polkit.sh)
+   from the GitHub repository (raw content, HTTPS);
+2. checks its **SHA-256** against the checksum **pinned inside the
+   extension** — a malicious commit that changed the script on GitHub is
+   refused;
+3. presents the whole script **read-only for review**, selectable and with a
+   copy-to-clipboard button;
+4. runs the reviewed content as root via `pkexec` when you press **Run**
+   (the content is also checked against the expected script markers).
+
+The dialog also carries a tabbed info area: **“Your action is required”**
+(the disclaimer and the residual-risk caveat) and **“FAQ”** (why polkit
+rules are required, why a group is created, why a wrapper is used), plus a
+one-line status showing the checksum result and the current step.
+
+If the script legitimately changes on GitHub, a new extension version is
+released with the updated pinned hash; until then the dialog may accept a
+**transitory second hash** with an explicit notice inviting you to update the
+extension. If the automatic download fails (offline, proxy, GitHub outage),
+the dialog falls back to manual paste: open the file on GitHub, copy the
+whole file and paste it into the dialog text area.
+
+The script:
 
 - Resolves the `nvme` binary path and hardcodes it into a restricted
   wrapper (`/usr/local/bin/nvme-smart-log-json`) — the wrapper only allows
@@ -137,6 +164,8 @@ pkexec /usr/local/bin/nvme-smart-uninstall.sh
 ## Repository layout
 
 ```
+setup-polkit.sh      # Installs the polkit + wrapper stack (run as root;
+                      #   fetched from GitHub, never shipped in the zip)
 nvme-monitor@rloutrel.github.com/
   extension.js        # GNOME Shell entry point: enable/disable lifecycle only
   indicator.js        # Panel indicator: menu, device rendering, polling,
@@ -168,7 +197,6 @@ nvme-monitor@rloutrel.github.com/
   v2flow.js            # v2 polkit install/uninstall flow orchestration
   stylesheet.css       # Theme-aware styles
   metadata.json        # Shell version, UUID, version
-  setup-polkit.sh      # Installs the polkit + wrapper stack (run as root)
   schemas/             # GSettings schema
   icons/bootstrap/     # Bundled SVG icons (Bootstrap Icons, MIT)
   po/                  # Translations (gettext)

@@ -46,15 +46,13 @@ if [[ "$(id -u)" -ne 0 ]]; then
     exit 1
 fi
 
-# Identify the real user who invoked this (SUDO_USER for sudo,
-# PKEXEC_UID for pkexec)
+# Identify the real user who invoked this (SUDO_USER for sudo, PKEXEC_UID for pkexec)
 REAL_USER="${SUDO_USER:-}"
 if [[ -z "$REAL_USER" && -n "${PKEXEC_UID:-}" ]]; then
     REAL_USER="$(getent passwd "$PKEXEC_UID" | cut -d: -f1)"
 fi
 if [[ -z "$REAL_USER" ]]; then
-    echo "Error: could not determine the invoking user" \
-        "(SUDO_USER/PKEXEC_UID)." >&2
+    echo "Error: could not determine the invoking user (SUDO_USER/PKEXEC_UID)." >&2
     exit 1
 fi
 
@@ -66,8 +64,7 @@ echo "==> Installing NVMe SMART polkit stack for user: $REAL_USER"
 echo "==> Detecting nvme binary..."
 
 if ! command -v nvme >/dev/null 2>&1; then
-    echo "Error: nvme binary not found." >&2
-    echo "  Install the 'nvme-cli' package first." >&2
+    echo "Error: nvme binary not found. Install the 'nvme-cli' package first." >&2
     echo "  Fedora: sudo dnf install nvme-cli" >&2
     echo "  Ubuntu: sudo apt install nvme-cli" >&2
     exit 1
@@ -75,20 +72,17 @@ fi
 
 NVME_BIN="$(command -v nvme)"
 
-# Resolve any symlink to the real binary (e.g. /usr/sbin →
-# /usr/bin on Fedora)
+# Resolve any symlink to the real binary (e.g. /usr/sbin → /usr/bin on Fedora)
 NVME_BIN="$(readlink -f "$NVME_BIN")"
 
-# Sanity check: refuse if the resolved path is not in a standard
-# system directory
+# Sanity check: refuse if the resolved path is not in a standard system directory
 case "$NVME_BIN" in
     /usr/bin/nvme|/usr/sbin/nvme|/bin/nvme|/sbin/nvme)
         echo "    Found: $NVME_BIN"
         ;;
     *)
         echo "Error: nvme found at unusual path: $NVME_BIN" >&2
-        echo "  Expected one of: /usr/bin/nvme, /usr/sbin/nvme," \
-            "/bin/nvme, /sbin/nvme" >&2
+        echo "  Expected one of: /usr/bin/nvme, /usr/sbin/nvme, /bin/nvme, /sbin/nvme" >&2
         exit 1
         ;;
 esac
@@ -110,8 +104,7 @@ if id -nG "$REAL_USER" | tr ' ' '\n' | grep -qx "$GROUP_NAME"; then
     echo "    User already in group."
 else
     usermod -aG "$GROUP_NAME" "$REAL_USER"
-    echo "    User added. A new login session is needed for this" \
-        "to take effect."
+    echo "    User added. A new login session is needed for this to take effect."
 fi
 
 # ---------------------------------------------------------------------------
@@ -132,8 +125,7 @@ case "\${1:-}" in
     exec $NVME_BIN smart-log -o json "\$1"
     ;;
   *)
-    echo "nvme-smart-log-json: invalid or missing device argument" \
-        "(expected /dev/nvme*)" >&2
+    echo "nvme-smart-log-json: invalid or missing device argument (expected /dev/nvme*)" >&2
     exit 1
     ;;
 esac
@@ -159,8 +151,7 @@ cat > "$POLICY_DIR/$POLICY_FILE" <<EOF
 
   <action id="$ACTION_ID">
     <description>NVMe Monitor: read NVMe SMART health data</description>
-    <message>Authentication is required to run the NVMe Monitor
-      SMART helper and read your drive's health information</message>
+    <message>Authentication is required to run the NVMe Monitor SMART helper and read your drive's health information</message>
 
     <defaults>
       <allow_any>no</allow_any>
@@ -168,8 +159,7 @@ cat > "$POLICY_DIR/$POLICY_FILE" <<EOF
       <allow_active>auth_admin</allow_active>
     </defaults>
 
-    <annotate
-      key="org.freedesktop.policykit.exec.path">$WRAPPER_PATH</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">$WRAPPER_PATH</annotate>
   </action>
 
 </policyconfig>
@@ -235,18 +225,15 @@ echo "==> Removing NVMe SMART polkit stack..."
 rm -f "$WRAPPER_PATH" && echo "    Removed: $WRAPPER_PATH"
 
 # Remove policy files
-rm -f "$POLICY_DIR/$POLICY_FILE" \
-    && echo "    Removed: $POLICY_DIR/$POLICY_FILE"
-rm -f "$POLICY_DIR/$UNINSTALL_POLICY_FILE" \
-    && echo "    Removed: $POLICY_DIR/$UNINSTALL_POLICY_FILE"
+rm -f "$POLICY_DIR/$POLICY_FILE" && echo "    Removed: $POLICY_DIR/$POLICY_FILE"
+rm -f "$POLICY_DIR/$UNINSTALL_POLICY_FILE" && echo "    Removed: $POLICY_DIR/$UNINSTALL_POLICY_FILE"
 
 # Remove rule files
 rm -f "$RULES_DIR/$RULE_FILE" && echo "    Removed: $RULES_DIR/$RULE_FILE"
 
 # Remove the uninstall rule last (but before self-deletion), so pkexec
 # can still authorize THIS script during its own execution.
-rm -f "$RULES_DIR/$UNINSTALL_RULE_FILE" \
-    && echo "    Removed: $RULES_DIR/$UNINSTALL_RULE_FILE"
+rm -f "$RULES_DIR/$UNINSTALL_RULE_FILE" && echo "    Removed: $RULES_DIR/$UNINSTALL_RULE_FILE"
 
 # Remove the group (safe: at this point the only member was the user who
 # installed, and the group grants nothing else).
@@ -268,8 +255,7 @@ echo "    Uninstall script installed."
 # ---------------------------------------------------------------------------
 # 7. Install the polkit action for the uninstall script
 # ---------------------------------------------------------------------------
-echo "==> Installing uninstall polkit action:" \
-    "$POLICY_DIR/$UNINSTALL_POLICY_FILE"
+echo "==> Installing uninstall polkit action: $POLICY_DIR/$UNINSTALL_POLICY_FILE"
 
 cat > "$POLICY_DIR/$UNINSTALL_POLICY_FILE" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -280,10 +266,8 @@ cat > "$POLICY_DIR/$UNINSTALL_POLICY_FILE" <<EOF
 <policyconfig>
 
   <action id="$UNINSTALL_ACTION_ID">
-    <description>NVMe Monitor: uninstall the SMART monitoring
-      components</description>
-    <message>Authentication is required to remove the NVMe Monitor
-      SMART helper (wrapper script, polkit action and rules)</message>
+    <description>NVMe Monitor: uninstall the SMART monitoring components</description>
+    <message>Authentication is required to remove the NVMe Monitor SMART helper (wrapper script, polkit action and rules)</message>
 
     <defaults>
       <allow_any>no</allow_any>
@@ -291,8 +275,7 @@ cat > "$POLICY_DIR/$UNINSTALL_POLICY_FILE" <<EOF
       <allow_active>auth_admin</allow_active>
     </defaults>
 
-    <annotate
-      key="org.freedesktop.policykit.exec.path">$UNINSTALL_PATH</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">$UNINSTALL_PATH</annotate>
   </action>
 
 </policyconfig>
