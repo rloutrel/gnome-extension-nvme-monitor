@@ -118,7 +118,7 @@ function readPciDeviceIdAsync(devicePath) {
             .then(([vendor, device]) => {
                 if (vendor === '' || device === '')
                     return '';
-                return `0x${parseInt(device, 16).toString(16)}`;
+                return `0x${Number.parseInt(device, 16).toString(16)}`;
             })
             .catch((e) => {
                 _warn(`Failed to read PCI device ID for ${name}: ${e}`);
