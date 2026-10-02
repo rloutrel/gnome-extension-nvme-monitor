@@ -258,6 +258,10 @@ msgstr ""
 msgid "Output of nvme smart-log:"
 msgstr ""
 
+#: indicator.js
+msgid "Controller PCI device ID:"
+msgstr ""
+
 #: indicator.js:1017
 msgid "Copy to clipboard"
 msgstr ""
@@ -288,6 +292,9 @@ msgstr ""
 #: indicator.js
 msgid "Confirm device rendering"
 msgstr ""
+
+#: indicator.js
+msgid "Firmware update available"
 #: indicator.js
 msgid "Install NVMe SMART access"
 msgstr ""

@@ -258,6 +258,10 @@ msgstr "Ausgabe von nvme list:"
 msgid "Output of nvme smart-log:"
 msgstr "Ausgabe von nvme smart-log:"
 
+#: indicator.js
+msgid "Controller PCI device ID:"
+msgstr "PCI-Geräte-ID des Controllers:"
+
 #: indicator.js:1017
 msgid "Copy to clipboard"
 msgstr "In die Zwischenablage kopieren"
@@ -288,6 +292,10 @@ msgstr "Dieses Gerät (%s) gehört zu einem unterstützten Hersteller, wurde abe
 #: indicator.js
 msgid "Confirm device rendering"
 msgstr "Gerätedarstellung bestätigen"
+
+#: indicator.js
+msgid "Firmware update available"
+msgstr "Firmware-Update verfügbar"
 #: indicator.js
 msgid "Install NVMe SMART access"
 msgstr "NVMe-SMART-Zugriff installieren"
