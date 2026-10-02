@@ -60,28 +60,35 @@ export function installV2StackFromPastedScript({scriptContent, wasInSmartGroup, 
         return {started: false};
     }
 
-    const writeFile = writeFileFn || ((path, contents) => {
-        GLib.file_set_contents(path, new TextEncoder().encode(contents));
-        Gio.File.new_for_path(path).set_attribute_uint32(
-            'unix::mode', 0o700, Gio.FileQueryInfoFlags.NONE, null);
-    });
+    const writeFile = writeFileFn || ((path, contents) => new Promise((resolve, reject) => {
+        const file = Gio.File.new_for_path(path);
+        file.replace_contents_bytes_async(
+            new TextEncoder().encode(contents), null, false,
+            Gio.FileCreateFlags.REPLACE_DESTINATION, null,
+            (source, result) => {
+                try {
+                    source.replace_contents_finish(result);
+                    source.set_attribute_uint32(
+                        'unix::mode', 0o700, Gio.FileQueryInfoFlags.NONE, null);
+                    resolve();
+                } catch (e) {
+                    reject(e);
+                }
+            });
+    }));
     const dir = tempDirFn
         ? tempDirFn()
         : GLib.build_filenamev([GLib.get_user_runtime_dir(), 'nvme-monitor-setup']);
     GLib.mkdir_with_parents(dir, 0o700);
     const scriptPath = GLib.build_filenamev([dir, buildSetupTempName()]);
 
-    try {
-        writeFile(scriptPath, prepared.script);
-    } catch (e) {
-        _warn(`could not write temp setup script: ${e.message}`);
-        notifyError(_('Installation failed'), e.message);
-        return {started: false};
-    }
-    _debug(`installV2StackFromPastedScript: ${scriptPath}`);
-
-    ui.setToggleSensitive(false);
-    runPkexecAsync([scriptPath]).then(result => {
+    const runInstall = () => writeFile(scriptPath, prepared.script)
+        .then(() => {
+            _debug(`installV2StackFromPastedScript: ${scriptPath}`);
+            ui.setToggleSensitive(false);
+            return runPkexecAsync([scriptPath]);
+        })
+        .then((result) => {
         GLib.unlink(scriptPath);
         ui.setToggleSensitive(true);
         if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
@@ -110,6 +117,13 @@ export function installV2StackFromPastedScript({scriptContent, wasInSmartGroup, 
         ui.setToggleSensitive(true);
         _warn(`Installation failed: ${e.message}`);
         notifyError(_('Installation failed'), e.message);
+        ui.setToggleState(false);
+        ui.setUpdating(false);
+    });
+    runInstall().catch((e) => {
+        _warn(`could not write temp setup script: ${e.message}`);
+        notifyError(_('Installation failed'), e.message);
+        ui.setToggleSensitive(true);
         ui.setToggleState(false);
         ui.setUpdating(false);
     });

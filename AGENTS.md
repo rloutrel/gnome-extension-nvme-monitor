@@ -91,7 +91,8 @@ in a pure module.
 6. On every successful SMART read, the composite temperature is appended to
    the per-device rolling history (`TempHistory`, last 10 minutes) and
    persisted to `/tmp/nvme-monitor-temp-history.json` via
-   `GLib.file_set_contents` (atomic). The history is rendered as a 10-minute
+   `Gio.File.replace_contents_bytes_async` (atomic, asynchronous — shell
+   code must never use synchronous file IO). The history is rendered as a 10-minute
    line graph (`St.DrawingArea` / Cairo) below each device's SMART section,
    colored by the temperature tier, with the min/max temperature over the
    window annotated on the left axis (`TempHistory.range()`). The max marker

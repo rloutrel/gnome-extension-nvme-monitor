@@ -1,0 +1,22 @@
+name: shexli
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+jobs:
+  shexli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Analyze extension source with shexli
+        uses: 3v1n0/shexli-ci@v1
+        with:
+          path: nvme-monitor@rloutrel.github.com
+          exclude: |
+            test/*
+            tools/*
+            po/*
