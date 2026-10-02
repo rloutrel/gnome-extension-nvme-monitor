@@ -1898,6 +1898,7 @@ export const Indicator = GObject.registerClass(
             this._attachHelperCursor(copyButton);
             this._attachHoverTooltip(copyButton, _('Copy to clipboard'));
             copyButton.connect('clicked', () => {
+                // shexli-ci: EGO-A-005 - user-triggered copy of the support JSON to the clipboard
                 const clipboard = St.Clipboard.get_default();
                 clipboard.set_text(St.ClipboardType.CLIPBOARD,
                     jsonText.length > 0 ? jsonText : (command || ''));
@@ -2572,6 +2573,7 @@ export const Indicator = GObject.registerClass(
                         dialog.close();
                 },
                 copyToClipboard: (text, button) => {
+                    // shexli-ci: EGO-A-005 - user-triggered copy of the reviewed setup script to the clipboard
                     const clipboard = St.Clipboard.get_default();
                     clipboard.set_text(St.ClipboardType.CLIPBOARD, text || '');
                     this._showCopiedFeedback(button);
