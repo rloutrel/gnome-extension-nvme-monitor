@@ -21,8 +21,10 @@ jobs:
       - name: Validate metadata
         run: node "nvme-monitor@rloutrel.github.com/test/validateMetadata.js"
 
-      - name: Compile GSettings schema
-        run: glib-compile-schemas --strict "nvme-monitor@rloutrel.github.com/schemas/"
+      - name: Validate GSettings schema (compiled schemas are not shipped since GNOME 45)
+        run: |
+          xmllint --noout "nvme-monitor@rloutrel.github.com/schemas/org.gnome.shell.extensions.nvme-monitor.gschema.xml"
+          rm -f "nvme-monitor@rloutrel.github.com/schemas/gschemas.compiled"
 
       - name: Compile translations
         run: |
@@ -39,7 +41,8 @@ jobs:
         run: |
           zip -r "../nvme-monitor@rloutrel.github.com.zip" . \
             -x 'po/*' \
-            -x 'test/*'
+            -x 'test/*' \
+            -x 'schemas/gschemas.compiled'
           unzip -l "../nvme-monitor@rloutrel.github.com.zip"
 
       - name: Validate zip structure
@@ -69,8 +72,8 @@ jobs:
 
               if not any(n.startswith('locale/') for n in names):
                   errors.append('locale/ missing from archive')
-              if 'schemas/gschemas.compiled' not in names:
-                  errors.append('schemas/gschemas.compiled missing from archive')
+              if 'schemas/gschemas.compiled' in names:
+                  errors.append('schemas/gschemas.compiled must not be shipped: GNOME Shell recompiles schemas at install time since version 45')
 
               forbidden = [n for n in names
                            if n.startswith(('po/', 'test/'))]

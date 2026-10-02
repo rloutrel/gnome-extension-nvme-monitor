@@ -51,23 +51,29 @@ import { parseSmart, detectManufacturer, getSupportLevel, SUPPORTED_MANUFACTURER
 import { assessFirmware } from './firmwareRegistry.js';
 // Validated-devices registry (ModelNumber -> manufacturer), loaded at
 // runtime because GJS in GNOME Shell 50 does not support JSON import
-// attributes. Falls back to an empty registry if the file is unreadable.
+// attributes. Loaded asynchronously (shell code must not block the main
+// loop with synchronous file IO) and filled in place when the read
+// completes; it stays an empty registry if the file is unreadable.
+const VALIDATED_DEVICES = {};
 function loadValidatedDevices() {
-    try {
-        const path = GLib.build_filenamev([
-            GLib.path_get_dirname(import.meta.url.replace('file://', '')),
-            'validatedDevices.json',
-        ]);
-        const [ok, bytes] = GLib.file_get_contents(path);
-        if (!ok)
-            return {};
-        return JSON.parse(new TextDecoder().decode(bytes));
-    } catch (e) {
-        _warn(`Failed to load validatedDevices.json: ${e}`);
-        return {};
-    }
+    const path = GLib.build_filenamev([
+        GLib.path_get_dirname(import.meta.url.replace('file://', '')),
+        'validatedDevices.json',
+    ]);
+    Gio.File.new_for_path(path).load_contents_async(
+        null,
+        (source, result) => {
+            try {
+                const [ok, bytes] = source.load_contents_finish(result);
+                if (!ok)
+                    return;
+                Object.assign(VALIDATED_DEVICES, JSON.parse(new TextDecoder().decode(bytes)));
+            } catch (e) {
+                _warn(`Failed to load validatedDevices.json: ${e}`);
+            }
+        });
 }
-const VALIDATED_DEVICES = loadValidatedDevices();
+loadValidatedDevices();
 
 // ---------------------------------------------------------------------------
 // Controller PCI device ID for a device path (e.g. '/dev/nvme0' ->
@@ -75,32 +81,56 @@ const VALIDATED_DEVICES = loadValidatedDevices();
 // revisions under the same ModelNumber (e.g. 970 EVO Plus Phoenix vs
 // Elpis), each with its own firmware line; the PCI device ID is the
 // discriminator the registry's per-revision firmware data keys on.
-// Returns '' when the sysfs files are unreadable (non-pci transport or
+// Asynchronous (Gio.File.load_contents_async) because shell code must not
+// block the main loop; sysfs values never change for a given controller,
+// so completed reads are cached and concurrent callers share one request.
+// Resolves to '' when the sysfs files are unreadable (non-pci transport or
 // unexpected layout), letting the firmware check degrade to 'unknown'.
 // ---------------------------------------------------------------------------
-function readPciDeviceId(devicePath) {
+const _pciDeviceIdCache = new Map();
+function readSysfsValueAsync(devicePath, fileName) {
+    const name = String(devicePath || '')
+        .replace(/^\/dev\//, '')
+        .replace(/n\d+$/, '');
+    return new Promise((resolve) => {
+        Gio.File
+            .new_for_path(`/sys/class/nvme/${name}/device/${fileName}`)
+            .load_contents_async(null, (source, result) => {
+                try {
+                    const [ok, contents] = source.load_contents_finish(result);
+                    resolve(ok ? new TextDecoder().decode(contents).trim() : '');
+                } catch {
+                    resolve('');
+                }
+            });
+    });
+}
+function readPciDeviceIdAsync(devicePath) {
     // `nvme list -o json` reports namespace paths (/dev/nvme1n1), but sysfs
     // indexes controllers (/sys/class/nvme/nvme1); strip the namespace suffix.
     const name = String(devicePath || '')
         .replace(/^\/dev\//, '')
         .replace(/n\d+$/, '');
-    try {
-        const vendorFile = Gio.File.new_for_path(`/sys/class/nvme/${name}/device/vendor`);
-        const deviceFile = Gio.File.new_for_path(`/sys/class/nvme/${name}/device/device`);
-        const [vendorOk, vendorContents] = vendorFile.load_contents(null);
-        const [deviceOk, deviceContents] = deviceFile.load_contents(null);
-        if (!vendorOk || !deviceOk)
-            return '';
-        const decoder = new TextDecoder();
-        const vendor = decoder.decode(vendorContents).trim();
-        const device = decoder.decode(deviceContents).trim();
-        if (vendor === '' || device === '')
-            return '';
-        return `0x${Number.parseInt(device, 16).toString(16)}`;
-    } catch (e) {
-        _warn(`Failed to read PCI device ID for ${name}: ${e}`);
-        return '';
-    }
+    if (_pciDeviceIdCache.has(name))
+        return _pciDeviceIdCache.get(name);
+    const pending = new Promise((resolve) => {
+        Promise.all([readSysfsValueAsync(devicePath, 'vendor'), readSysfsValueAsync(devicePath, 'device')])
+            .then(([vendor, device]) => {
+                if (vendor === '' || device === '')
+                    return '';
+                return `0x${Number.parseInt(device, 16).toString(16)}`;
+            })
+            .catch((e) => {
+                _warn(`Failed to read PCI device ID for ${name}: ${e}`);
+                return '';
+            })
+            .then((id) => {
+                _pciDeviceIdCache.set(name, Promise.resolve(id));
+                resolve(id);
+            });
+    });
+    _pciDeviceIdCache.set(name, pending);
+    return pending;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,8 +182,8 @@ import { TempHistory, TEMP_HISTORY_WINDOW_MS } from './tempHistory.js';
 import { WRAPPER_PATH } from './polkitManager.js';
 
 // Persisted rolling temperature history (last 30 minutes, per device). The file
-// is written atomically by GLib.file_set_contents after each capture so a
-// crash/restart keeps the recent curve, and it is pruned on load.
+// is written atomically after each capture so a crash/restart keeps the
+// recent curve, and it is pruned on load.
 const TEMP_HISTORY_PATH = GLib.build_filenamev(
     [GLib.get_user_runtime_dir(), 'nvme-monitor-temp-history.json']);
 
@@ -1002,7 +1032,7 @@ export const Indicator = GObject.registerClass(
         // rendered as a 30-minute line graph; devices in the red tier get a
         // dedicated 500ms refresh (see _syncCriticalTimers).
         // -------------------------------------------------------------------
-        _refreshDevices() {
+        async _refreshDevices() {
             // Re-sync the toggle with the installed stack: the state can
             // change outside the extension (manual uninstall script).
             const v2Now = checkV2Installed();
@@ -1055,15 +1085,18 @@ export const Indicator = GObject.registerClass(
                     numeric: true,
                 })
             );
-            for (let i = 0; i < sortedDevices.length; i++) {
-                if (i > 0) {
-                    this._devicesSection.addMenuItem(new PopupSeparatorMenuItem());
-                }
-                if (this._renderDevice(sortedDevices[i], v2Installed, now, lvmInfo)) {
-                    criticalPaths.push(sortedDevices[i].DevicePath);
-                }
-            }
-
+            await sortedDevices.reduce(
+                (chain, dev, i) => chain.then(() => {
+                    if (i > 0) {
+                        this._devicesSection.addMenuItem(new PopupSeparatorMenuItem());
+                    }
+                    return this._renderDevice(dev, v2Installed, now, lvmInfo)
+                        .then((critical) => {
+                            if (critical)
+                                criticalPaths.push(dev.DevicePath);
+                        });
+                }),
+                Promise.resolve());
             this._syncCriticalTimers(criticalPaths);
         }
 
@@ -1126,7 +1159,7 @@ export const Indicator = GObject.registerClass(
         // added. Returns true when the device is in the red (critical/hot)
         // tier and should get a 500ms fast refresh.
         // -------------------------------------------------------------------
-        _renderDevice(dev, v2Installed, now, lvmInfo) {
+        async _renderDevice(dev, v2Installed, now, lvmInfo) {
             // SMART data (requires polkit stack). Fetched first so the
             // health gauges (if any) can be placed on the meta line.
             let smartObj = null;
@@ -1161,7 +1194,7 @@ export const Indicator = GObject.registerClass(
             // exact model is not confirmed working yet (ask to confirm the
             // rendering), red when the device seems badly handled (ask to
             // provide information).
-            const support = this._unknownDeviceSupport(parsedSmart, smartObj, dev, smartParseError);
+            const support = await this._unknownDeviceSupport(parsedSmart, smartObj, dev, smartParseError);
             this._addDeviceHeader(
                 dev.ModelNumber || dev.DevicePath,
                 healthGauges,
@@ -1173,7 +1206,7 @@ export const Indicator = GObject.registerClass(
             const diskUsage = this._collectDiskUsageInfo(dev.DevicePath, lvmInfo);
             this._addDeviceMeta(
                 dev.DevicePath, dev.Firmware, null, diskUsage,
-                this._firmwareButtonFor(dev));
+                await this._firmwareButtonFor(dev));
 
             if (v2Installed && smartObj && !smartParseError) {
                 this._addSmartInfo(smartObj, dev.ModelNumber);
@@ -1225,25 +1258,27 @@ export const Indicator = GObject.registerClass(
             // revisions under the same ModelNumber; known models with an
             // unregistered revision get the orange '!' so their owners
             // report the revision and we can document it.
-            const pciDeviceId = readPciDeviceId(dev.DevicePath);
-            _debug(`support level: model='${dev.ModelNumber || ''}' `
-                + `pciDeviceId='${pciDeviceId}' manufacturer='${manufacturer}'`);
-            const level = getSupportLevel(
-                dev.ModelNumber || '', manufacturer, smartParseError, VALIDATED_DEVICES,
-                pciDeviceId);
-            if (level === 'validated')
-                return null;
-            let listRaw = this._cachedListJson;
-            if (!listRaw) {
-                listRaw = this._fetchListJson();
-            }
-            return {
-                smartRaw,
-                listRaw,
-                lspciRaw: this._fetchPciDeviceId(dev.DevicePath),
-                modelNumber: dev.ModelNumber || '',
-                supportLevel: level,
-            };
+            return readPciDeviceIdAsync(dev.DevicePath)
+                .then((pciDeviceId) => {
+                    _debug(`support level: model='${dev.ModelNumber || ''}' `
+                        + `pciDeviceId='${pciDeviceId}' manufacturer='${manufacturer}'`);
+                    const level = getSupportLevel(
+                        dev.ModelNumber || '', manufacturer, smartParseError, VALIDATED_DEVICES,
+                        pciDeviceId);
+                    if (level === 'validated')
+                        return null;
+                    let listRaw = this._cachedListJson;
+                    if (!listRaw) {
+                        listRaw = this._fetchListJson();
+                    }
+                    return {
+                        smartRaw,
+                        listRaw,
+                        lspciRaw: this._fetchPciDeviceId(dev.DevicePath),
+                        modelNumber: dev.ModelNumber || '',
+                        supportLevel: level,
+                    };
+                });
         }
 
         // -------------------------------------------------------------------
@@ -1255,26 +1290,16 @@ export const Indicator = GObject.registerClass(
         // extract the [vendor:device] token from this drive's line in the
         // `lspci -nn` output. Returns null when both fail.
         // -------------------------------------------------------------------
-        _fetchPciDeviceId(devicePath) {
-            // Primary: sysfs. readPciDeviceId() returns the bare device ID
-            // (e.g. '0xa808'); combine it with the vendor file's value to
-            // build the 'vendor:device' form (144d:a808).
-            const name = String(devicePath || '')
-                .replace(/^\/dev\//, '')
-                .replace(/n\d+$/, '');
-            try {
-                const [vendorOk, vendorContents] = Gio.File
-                    .new_for_path(`/sys/class/nvme/${name}/device/vendor`)
-                    .load_contents(null);
-                const deviceId = readPciDeviceId(devicePath);
-                if (vendorOk && deviceId !== '') {
-                    const vendor = new TextDecoder().decode(vendorContents).trim();
-                    const vendorHex = vendor.replace(/^0x/, '').toLowerCase();
-                    const deviceHex = deviceId.replace(/^0x/, '');
-                    return `${vendorHex}:${deviceHex}`;
-                }
-            } catch (e) {
-                _warn(`support dialog: sysfs PCI ID read failed for ${name}: ${e}`);
+        async _fetchPciDeviceId(devicePath) {
+            // Primary: sysfs. readPciDeviceIdAsync() resolves to the bare
+            // device ID (e.g. '0xa808'); combine it with the vendor file's
+            // value to build the 'vendor:device' form (144d:a808).
+            const vendor = await readSysfsValueAsync(devicePath, 'vendor');
+            const deviceId = await readPciDeviceIdAsync(devicePath);
+            if (vendor !== '' && deviceId !== '') {
+                const vendorHex = vendor.replace(/^0x/, '').toLowerCase();
+                const deviceHex = deviceId.replace(/^0x/, '');
+                return `${vendorHex}:${deviceHex}`;
             }
             // Fallback: this drive's `lspci -nn` line, extracting the
             // [vendor:device] token from the trailing brackets.
@@ -1387,12 +1412,19 @@ export const Indicator = GObject.registerClass(
         // -------------------------------------------------------------------
         _loadTempHistory() {
             try {
-                const [ok, contents] = GLib.file_get_contents(TEMP_HISTORY_PATH);
-                if (!ok || !contents) return;
-                const decoder = new TextDecoder();
-                const str = decoder.decode(contents);
-                this._tempHistory = TempHistory.deserialize(str, Date.now());
-                _debug(`Temp history loaded from ${TEMP_HISTORY_PATH} (${this._tempHistory.devices().length} devices)`);
+                Gio.File.new_for_path(TEMP_HISTORY_PATH).load_contents_async(
+                    null,
+                    (source, result) => {
+                        try {
+                            const [ok, contents] = source.load_contents_finish(result);
+                            if (!ok || !contents) return;
+                            const str = new TextDecoder().decode(contents);
+                            this._tempHistory = TempHistory.deserialize(str, Date.now());
+                            _debug(`Temp history loaded from ${TEMP_HISTORY_PATH} (${this._tempHistory.devices().length} devices)`);
+                        } catch (e) {
+                            _debug(`Temp history load skipped: ${e.message}`);
+                        }
+                    });
             } catch (e) {
                 _debug(`Temp history load skipped: ${e.message}`);
             }
@@ -1400,18 +1432,26 @@ export const Indicator = GObject.registerClass(
 
         // -------------------------------------------------------------------
         // Persist the rolling temperature history to /tmp atomically.
-        // GLib.file_set_contents writes via a temp file then renames, so a
-        // crash mid-write cannot leave a truncated file. Failures are
-        // debug-logged only (the history is best-effort).
+        // Gio.File.replace_contents_bytes_async writes via a temp file then
+        // renames, so a crash mid-write cannot leave a truncated file, and
+        // it never blocks the main loop. Failures are debug-logged only
+        // (the history is best-effort).
         // -------------------------------------------------------------------
         _saveTempHistory() {
             try {
                 const str = this._tempHistory.serialize();
                 const encoder = new TextEncoder();
                 const bytes = encoder.encode(str);
-                if (!GLib.file_set_contents(TEMP_HISTORY_PATH, bytes)) {
-                    _debug('Temp history save failed (file_set_contents returned false)');
-                }
+                const file = Gio.File.new_for_path(TEMP_HISTORY_PATH);
+                file.replace_contents_bytes_async(
+                    bytes, null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null,
+                    (source, result) => {
+                        try {
+                            source.replace_contents_finish(result);
+                        } catch (e) {
+                            _debug(`Temp history save failed: ${e.message}`);
+                        }
+                    });
             } catch (e) {
                 _debug(`Temp history save failed: ${e.message}`);
             }
@@ -1751,10 +1791,12 @@ export const Indicator = GObject.registerClass(
             const entry = VALIDATED_DEVICES[String(dev.ModelNumber || '').trim()];
             if (!entry)
                 return null;
-            const pciDeviceId = readPciDeviceId(dev.DevicePath);
-            if (assessFirmware(entry, dev.Firmware, pciDeviceId) !== 'outdated')
-                return null;
-            return this._createFirmwareButton(entry.manufacturer);
+            return readPciDeviceIdAsync(dev.DevicePath)
+                .then((pciDeviceId) => {
+                    if (assessFirmware(entry, dev.Firmware, pciDeviceId) !== 'outdated')
+                        return null;
+                    return this._createFirmwareButton(entry.manufacturer);
+                });
         }
 
         // The button itself: opens the manufacturer's firmware download page.
@@ -1856,6 +1898,7 @@ export const Indicator = GObject.registerClass(
             this._attachHelperCursor(copyButton);
             this._attachHoverTooltip(copyButton, _('Copy to clipboard'));
             copyButton.connect('clicked', () => {
+                // shexli-ci: EGO-A-005 - user-triggered copy of the support JSON to the clipboard
                 const clipboard = St.Clipboard.get_default();
                 clipboard.set_text(St.ClipboardType.CLIPBOARD,
                     jsonText.length > 0 ? jsonText : (command || ''));
@@ -2530,6 +2573,7 @@ export const Indicator = GObject.registerClass(
                         dialog.close();
                 },
                 copyToClipboard: (text, button) => {
+                    // shexli-ci: EGO-A-005 - user-triggered copy of the reviewed setup script to the clipboard
                     const clipboard = St.Clipboard.get_default();
                     clipboard.set_text(St.ClipboardType.CLIPBOARD, text || '');
                     this._showCopiedFeedback(button);
