@@ -1,3 +1,4 @@
+import Gio from 'gi://Gio';
 import {parseFilesystemUsage} from './diskUsageModel.js';
 import {parsePvReport, filterUsablePhysicalVolumes, parseLvReport} from './lvmReport.js';
 
@@ -100,7 +101,16 @@ export function writeDiskUsageDiagnostic(GLib, directory, devicePath, diagnostic
         if (!GLib.file_test(directory, GLib.FileTest.IS_DIR)) GLib.mkdir_with_parents(directory, 0o700);
         const baseName = String(devicePath).replace(/^\/dev\//, '').replace(/[^A-Za-z0-9_.-]/g, '_');
         const path = GLib.build_filenamev([directory, `${baseName}.json`]);
-        GLib.file_set_contents(path, `${JSON.stringify(diagnostic, null, 2)}\n`);
+        Gio.File.new_for_path(path).replace_contents_bytes_async(
+            new TextEncoder().encode(`${JSON.stringify(diagnostic, null, 2)}\n`),
+            null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null,
+            (source, result) => {
+                try {
+                    source.replace_contents_finish(result);
+                } catch (error) {
+                    debug(`disk usage diagnostic write skipped: ${error.message}`);
+                }
+            });
     } catch (error) {
         debug(`disk usage diagnostic write skipped: ${error.message}`);
     }
