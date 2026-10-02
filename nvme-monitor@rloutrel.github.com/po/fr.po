@@ -45,8 +45,8 @@ msgid "Assisted by"
 msgstr "Assisté par"
 
 #: indicator.js:132
-msgid "Enable NVMe smart-log access"
-msgstr "Activer l'accès aux smart-logs NVMe"
+msgid "Use NVMe SMART access"
+msgstr "Utiliser l'accès NVMe SMART"
 
 #: indicator.js:163
 msgid "Preferences"
@@ -99,8 +99,8 @@ msgid "  Stale data"
 msgstr "  Données obsolètes"
 
 #: indicator.js:454
-msgid "  Install NVMe Stack for SMART data"
-msgstr "  Installer la pile NVMe pour les données SMART"
+msgid "  Install the NVMe SMART stack"
+msgstr "  Installer la pile NVMe SMART"
 
 #: indicator.js:1342
 msgid "Controller"
@@ -149,10 +149,6 @@ msgstr "Erreurs média"
 #: indicator.js:1431
 msgid "Critical Warning"
 msgstr "Avertissement critique"
-
-#: indicator.js:1457
-msgid "setup-polkit.sh not found. Place it in the extension directory."
-msgstr "setup-polkit.sh introuvable. Placez-le dans le répertoire de l'extension."
 
 #: indicator.js:1474
 msgid "NVMe polkit stack installed!"
@@ -286,9 +282,159 @@ msgstr "Impossible d'ouvrir la page de ticket d'assistance"
 msgid "Close"
 msgstr "Fermer"
 #: indicator.js
-msgid "This device (%s) belongs to a supported manufacturer, but it has not been explicitly confirmed as working yet. Please open a GitHub issue to confirm that it works, or to specify the problem that you are encountering, and share the data below."
+msgid "This device (%s) belongs to a supported manufacturer, but it has not been explicitly confirmed as working yet. Please open a GitHub issue to confirm that it works, or to describe the problem that you are encountering, and share the data below."
 msgstr "Cet appareil (%s) appartient à un fabricant pris en charge, mais il n'a pas encore été explicitement confirmé comme fonctionnel. Merci d'ouvrir un ticket GitHub pour confirmer qu'il fonctionne, ou pour décrire le problème que vous rencontrez, en partageant les données ci-dessous."
 
 #: indicator.js
 msgid "Confirm device rendering"
 msgstr "Confirmer l'affichage de l'appareil"
+#: indicator.js
+msgid "Install NVMe SMART access"
+msgstr "Installer l'accès NVMe SMART"
+
+#: indicator.js
+msgid ""
+"Enabling SMART access needs a small root component to be installed (a wrapper, "
+"a system group and a polkit policy). This is not 100% automatic, so that the "
+"extension never runs a local script as root — it might have been created by a "
+"malicious program. Instead, the script below was fetched from GitHub and "
+"compared to the checksum pinned in the extension: review it, then press Run to "
+"install it as sudo (pkexec). You will need to log out and back in afterwards, "
+"for the group rights to be applied."
+msgstr "L'activation de l'accès SMART nécessite l'installation d'un petit composant root (un wrapper, un groupe système et une politique polkit). Ce n'est pas 100% automatique, afin que l'extension n'exécute jamais un script local en tant que root — il pourrait avoir été créé par un programme malveillant. À la place, le script ci-dessous a été récupéré depuis GitHub et comparé à la somme de contrôle épinglée dans l'extension : examinez-le, puis appuyez sur Exécuter pour l'installer en tant que sudo (pkexec). Vous devrez vous déconnecter puis vous reconnecter ensuite, pour que les droits du groupe soient appliqués."
+#: indicator.js
+msgid ""
+"This is still not ideal: a modification of the extension could call "
+"pkexec with a locally created script, different from the one shown. "
+"Therefore the safest way is to download the script yourself (see the "
+"link below) and run it with pkexec on your own."
+msgstr "Cela reste toutefois idéal : une modification de l'extension pourrait appeler pkexec avec un script créé localement, différent de celui affiché. Le plus sûr est donc de télécharger le script vous-même (voir le lien ci-dessous) et de l'exécuter vous-même avec pkexec."
+
+
+#: indicator.js
+msgid "Open the script on GitHub"
+msgstr "Ouvrir le script sur GitHub"
+
+#: indicator.js
+msgid "Script location: %s"
+msgstr "Emplacement du script : %s"
+
+#: indicator.js
+msgid "Checksum verified: the fetched script matches the SHA-256 pinned in this extension."
+msgstr "Somme de contrôle vérifiée : le script récupéré correspond au SHA-256 épinglé dans cette extension."
+
+#: indicator.js
+msgid "Running the installer (pkexec)…"
+msgstr "Exécution de l'installateur (pkexec)…"
+
+#: indicator.js
+msgid "The script was rejected before execution."
+msgstr "Le script a été rejeté avant exécution."
+
+#: indicator.js
+msgid "Script content:"
+msgstr "Collez setup-polkit.sh ici :"
+
+#: indicator.js
+msgid "Cancel"
+msgstr "Annuler"
+
+#: indicator.js
+msgid "Run"
+msgstr "Exécuter"
+
+#: v2flow.js
+msgid "Setup script rejected"
+msgstr "Script d'installation rejeté"
+
+#: v2script.js
+msgid "The pasted content does not look like the setup script (unexpected size)."
+msgstr "Le contenu collé ne ressemble pas au script d'installation (taille inattendue)."
+
+#: v2script.js
+msgid "The pasted content does not start with a bash interpreter line (#!/bin/bash)."
+msgstr "Le contenu collé ne commence pas par une ligne d'interpréteur bash (#!/bin/bash)."
+
+#: v2script.js
+msgid ""
+"The pasted content is not the expected setup script (missing markers). "
+"Please copy the whole file from the repository."
+msgstr "Le contenu collé n'est pas le script d'installation attendu (marqueurs manquants). Merci de copier le fichier entier depuis le dépôt."
+
+#: v2script.js
+msgid "The pasted content could not be read."
+msgstr "Le contenu collé n'a pas pu être lu."
+
+#: indicator.js
+msgid "Fetching the setup script…"
+msgstr "Récupération du script d'installation…"
+
+#: indicator.js
+msgid ""
+"The setup script was updated on GitHub after this extension version was "
+"released, and its checksum is only approved temporarily. You can review "
+"and run it now; update the extension when a newer version is available."
+msgstr "Le script d'installation a été modifié sur GitHub après la sortie de cette version de l'extension, et sa somme de contrôle n'est approuvée que temporairement. Vous pouvez le vérifier et l'exécuter maintenant ; mettez à jour l'extension dès qu'une version plus récente est disponible."
+
+#: indicator.js
+msgid ""
+"The fetched script does not match the checksum pinned in this extension "
+"version: it may have been modified on GitHub. For safety it cannot be run. "
+"Update the extension to get the newly pinned checksum."
+msgstr "Le script récupéré ne correspond pas à la somme de contrôle épinglée dans cette version de l'extension : il a pu être modifié sur GitHub. Par sécurité, il ne peut pas être exécuté. Mettez à jour l'extension pour obtenir la nouvelle somme de contrôle épinglée."
+
+#: indicator.js
+msgid ""
+"The script could not be fetched automatically (%s). Please open it on "
+"GitHub, copy the whole file and paste "
+"it below."
+msgstr "Le script n'a pas pu être récupéré automatiquement (%s). Merci de l'ouvrir sur GitHub, de copier le fichier entier et de le coller ci-dessous."
+
+#: indicator.js
+msgid ""
+"The script was not found at its expected location (%s). It is published "
+"with the extension version that ships it, so it may not be available there "
+"yet. Please open the location link above, copy the whole file and paste it "
+"below instead."
+msgstr "Le script est introuvable à son emplacement attendu (%s). Il est publié avec la version de l'extension qui l'expédie, il n'est donc peut-être pas encore disponible à cet endroit. Merci d'ouvrir le lien d'emplacement ci-dessus, de copier le fichier entier et de le coller ci-dessous à la place."
+#: indicator.js
+msgid ""
+"Why are polkit rules required?"
+msgstr "Pourquoi des règles polkit sont-elles nécessaires ?"
+#: indicator.js
+msgid ""
+"Reading the SMART log requires root rights. The polkit action lets the "
+"extension run the wrapper as root via pkexec without a password prompt on every "
+"read; a second action allows the uninstaller to run the same way. The initial "
+"install itself is not covered by these rules: it runs once via pkexec with your "
+"password."
+msgstr "La lecture du journal SMART nécessite des droits root. L'action polkit permet à l'extension d'exécuter le wrapper en root via pkexec sans demande de mot de passe à chaque lecture ; une seconde action permet à l'uninstallateur de fonctionner de la même manière. L'installation initiale n'est pas couverte par ces règles : elle s'exécute une seule fois via pkexec avec votre mot de passe."
+#: indicator.js
+msgid ""
+"Why create a group?"
+msgstr "Pourquoi créer un groupe ?"
+#: indicator.js
+msgid ""
+"The polkit rules would otherwise grant passwordless root execution to every "
+"user of the machine. Restricting them to members of the nvme-smart group, from "
+"a local and active session, limits the grant to the user who installed the "
+"component."
+msgstr "Sans cela, les règles polkit accorderaient l'exécution root sans mot de passe à tous les utilisateurs de la machine. Leur restriction aux membres du groupe nvme-smart, depuis une session locale et active, limite l'octroi à l'utilisateur qui a installé le composant."
+#: indicator.js
+msgid ""
+"Why a wrapper?"
+msgstr "Pourquoi un wrapper ?"
+#: indicator.js
+msgid ""
+"A polkit action is bound to one exact executable. The wrapper hardcodes the "
+"resolved nvme binary path and only accepts smart-log -o json on /dev/nvme* "
+"devices, so the granted root access cannot be turned into an arbitrary command."
+msgstr "Une action polkit est liée à un exécutable exact. Le wrapper code en dur le chemin résolu du binaire nvme et n'accepte que smart-log -o json sur les périphériques /dev/nvme*, afin que l'accès root accordé ne puisse pas être transformé en une commande arbitraire."
+#: indicator.js
+msgid ""
+"Your action is required"
+msgstr "Votre action est requise"
+#: indicator.js
+msgid ""
+"FAQ"
+msgstr "FAQ"

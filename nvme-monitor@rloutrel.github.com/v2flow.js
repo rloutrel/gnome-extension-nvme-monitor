@@ -16,14 +16,14 @@ import {gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js'
 
 import {_debug, _warn, _error, notify, notifyError} from './logger.js';
 import {runPkexecAsync} from './subprocess.js';
-import {UNINSTALL_PATH, SETUP_SCRIPT_NAME} from './polkitManager.js';
+import {UNINSTALL_PATH} from './polkitManager.js';
 import {
     KILL_THRESHOLD,
-    buildSetupPath,
     handleUninstallNotFound,
 } from './v2decisions.js';
+import {preparePastedSetupScript, setupScriptErrorMessage, buildSetupTempName} from './v2script.js';
 
-export {KILL_THRESHOLD, buildSetupPath, handleUninstallNotFound};
+export {KILL_THRESHOLD, handleUninstallNotFound};
 
 // Request that GNOME Shell disable this extension via D-Bus. Used to break
 // the uninstall-not-found toggle loop once the kill threshold is reached.
@@ -46,23 +46,43 @@ export function disableSelfViaDbus(uuid) {
     }
 }
 
-// Install the polkit stack via setup-polkit.sh (pkexec, async). Returns
-// {started}: false when the setup script is missing (toggle disabled).
-export function installV2Stack({extensionPath, wasInSmartGroup, ui}) {
-    const setupPath = buildSetupPath(extensionPath, SETUP_SCRIPT_NAME);
-    _debug(`installV2Stack: setupPath=${setupPath}`);
-
-    if (!GLib.file_test(setupPath, GLib.FileTest.EXISTS)) {
-        _warn(`setup-polkit.sh not found: ${setupPath}`);
-        notifyError(_('setup-polkit.sh not found. Place it in the extension directory.'));
-        ui.setToggleSensitive(false);
-        ui.setUpdating(false);
+// Install the polkit stack by executing the setup script the user pasted
+// from the GitHub repository into the setup dialog. The script content is
+// first validated (v2script.js), then written to a 0700 temp file owned by
+// the user and run via pkexec (async). The file is always deleted afterwards.
+// Returns {started}: false when the pasted content is invalid (the dialog
+// shows the reason and stays open).
+export function installV2StackFromPastedScript({scriptContent, wasInSmartGroup, ui, writeFileFn = null, tempDirFn = null}) {
+    const prepared = preparePastedSetupScript(scriptContent);
+    if (!prepared.ok) {
+        _warn(`pasted setup script rejected: ${prepared.reason}`);
+        notifyError(_('Setup script rejected'), setupScriptErrorMessage(prepared.reason, _));
         return {started: false};
     }
 
-    _debug('Running pkexec setup-polkit.sh...');
+    const writeFile = writeFileFn || ((path, contents) => {
+        GLib.file_set_contents(path, new TextEncoder().encode(contents));
+        Gio.File.new_for_path(path).set_attribute_uint32(
+            'unix::mode', 0o700, Gio.FileQueryInfoFlags.NONE, null);
+    });
+    const dir = tempDirFn
+        ? tempDirFn()
+        : GLib.build_filenamev([GLib.get_user_runtime_dir(), 'nvme-monitor-setup']);
+    GLib.mkdir_with_parents(dir, 0o700);
+    const scriptPath = GLib.build_filenamev([dir, buildSetupTempName()]);
+
+    try {
+        writeFile(scriptPath, prepared.script);
+    } catch (e) {
+        _warn(`could not write temp setup script: ${e.message}`);
+        notifyError(_('Installation failed'), e.message);
+        return {started: false};
+    }
+    _debug(`installV2StackFromPastedScript: ${scriptPath}`);
+
     ui.setToggleSensitive(false);
-    runPkexecAsync([setupPath]).then(result => {
+    runPkexecAsync([scriptPath]).then(result => {
+        GLib.unlink(scriptPath);
         ui.setToggleSensitive(true);
         if (result.stderr) _debug(`stderr: ${result.stderr.trim()}`);
         if (result.stdout) _debug(`stdout: ${result.stdout.trim()}`);
@@ -82,6 +102,11 @@ export function installV2Stack({extensionPath, wasInSmartGroup, ui}) {
         }
         ui.setUpdating(false);
     }).catch(e => {
+        try {
+            GLib.unlink(scriptPath);
+        } catch {
+            // Already gone.
+        }
         ui.setToggleSensitive(true);
         _warn(`Installation failed: ${e.message}`);
         notifyError(_('Installation failed'), e.message);

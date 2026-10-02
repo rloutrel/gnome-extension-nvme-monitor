@@ -49,7 +49,7 @@ msgid "NVMe Monitor"
 msgstr ""
 
 #: indicator.js:132
-msgid "Enable NVMe smart-log access"
+msgid "Use NVMe SMART access"
 msgstr ""
 
 #: indicator.js:163
@@ -99,7 +99,7 @@ msgid "  Stale data"
 msgstr ""
 
 #: indicator.js:454
-msgid "  Install NVMe Stack for SMART data"
+msgid "  Install the NVMe SMART stack"
 msgstr ""
 
 #: indicator.js:1342
@@ -148,10 +148,6 @@ msgstr ""
 
 #: indicator.js:1431
 msgid "Critical Warning"
-msgstr ""
-
-#: indicator.js:1457
-msgid "setup-polkit.sh not found. Place it in the extension directory."
 msgstr ""
 
 #: indicator.js:1474
@@ -291,4 +287,154 @@ msgstr ""
 
 #: indicator.js
 msgid "Confirm device rendering"
+msgstr ""
+#: indicator.js
+msgid "Install NVMe SMART access"
+msgstr ""
+
+#: indicator.js
+msgid ""
+"Enabling SMART access needs a small root component to be installed (a wrapper, "
+"a system group and a polkit policy). This is not 100% automatic, so that the "
+"extension never runs a local script as root — it might have been created by a "
+"malicious program. Instead, the script below was fetched from GitHub and "
+"compared to the checksum pinned in the extension: review it, then press Run to "
+"install it as sudo (pkexec). You will need to log out and back in afterwards, "
+"for the group rights to be applied."
+msgstr ""
+
+#: indicator.js
+msgid ""
+"This is still not ideal: a modification of the extension could call "
+"pkexec with a locally created script, different from the one shown. "
+"Therefore the safest way is to download the script yourself (see the "
+"link below) and run it with pkexec on your own."
+msgstr ""
+
+
+#: indicator.js
+msgid "Open the script on GitHub"
+msgstr ""
+
+#: indicator.js
+msgid "Script location: %s"
+msgstr ""
+
+#: indicator.js
+msgid "Checksum verified: the fetched script matches the SHA-256 pinned in this extension."
+msgstr ""
+
+#: indicator.js
+msgid "Running the installer (pkexec)…"
+msgstr ""
+
+#: indicator.js
+msgid "The script was rejected before execution."
+msgstr ""
+
+#: indicator.js
+msgid "Script content:"
+msgstr ""
+
+#: indicator.js
+msgid "Cancel"
+msgstr ""
+
+#: indicator.js
+msgid "Run"
+msgstr ""
+
+#: v2flow.js
+msgid "Setup script rejected"
+msgstr ""
+
+#: v2script.js
+msgid "The pasted content does not look like the setup script (unexpected size)."
+msgstr ""
+
+#: v2script.js
+msgid "The pasted content does not start with a bash interpreter line (#!/bin/bash)."
+msgstr ""
+
+#: v2script.js
+msgid ""
+"The pasted content is not the expected setup script (missing markers). "
+"Please copy the whole file from the repository."
+msgstr ""
+
+#: v2script.js
+msgid "The pasted content could not be read."
+msgstr ""
+
+#: indicator.js
+msgid "Fetching the setup script…"
+msgstr ""
+
+#: indicator.js
+msgid ""
+"The setup script was updated on GitHub after this extension version was "
+"released, and its checksum is only approved temporarily. You can review "
+"and run it now; update the extension when a newer version is available."
+msgstr ""
+
+#: indicator.js
+msgid ""
+"The fetched script does not match the checksum pinned in this extension "
+"version: it may have been modified on GitHub. For safety it cannot be run. "
+"Update the extension to get the newly pinned checksum."
+msgstr ""
+
+#: indicator.js
+msgid ""
+"The script could not be fetched automatically (%s). Please open it on "
+"GitHub, copy the whole file and paste "
+"it below."msgstr ""
+
+#: indicator.js
+msgid ""
+"The script was not found at its expected location (%s). It is published "
+"with the extension version that ships it, so it may not be available there "
+"yet. Please open the location link above, copy the whole file and paste it "
+"below instead."
+msgstr ""
+#: indicator.js
+msgid ""
+"Why are polkit rules required?"
+msgstr ""
+#: indicator.js
+msgid ""
+"Reading the SMART log requires root rights. The polkit action lets the "
+"extension run the wrapper as root via pkexec without a password prompt on every "
+"read; a second action allows the uninstaller to run the same way. The initial "
+"install itself is not covered by these rules: it runs once via pkexec with your "
+"password."
+msgstr ""
+#: indicator.js
+msgid ""
+"Why create a group?"
+msgstr ""
+#: indicator.js
+msgid ""
+"The polkit rules would otherwise grant passwordless root execution to every "
+"user of the machine. Restricting them to members of the nvme-smart group, from "
+"a local and active session, limits the grant to the user who installed the "
+"component."
+msgstr ""
+#: indicator.js
+msgid ""
+"Why a wrapper?"
+msgstr ""
+#: indicator.js
+msgid ""
+"A polkit action is bound to one exact executable. The wrapper hardcodes the "
+"resolved nvme binary path and only accepts smart-log -o json on /dev/nvme* "
+"devices, so the granted root access cannot be turned into an arbitrary command."
+msgstr ""
+#: indicator.js
+msgid ""
+"Your action is required"
+msgstr ""
+#: indicator.js
+msgid ""
+"FAQ"
 msgstr ""

@@ -3,21 +3,11 @@ import assert from 'node:assert/strict';
 
 import {
     KILL_THRESHOLD,
-    buildSetupPath,
     handleUninstallNotFound,
 } from '../v2decisions.js';
 
 test('KILL_THRESHOLD is 4', () => {
     assert.equal(KILL_THRESHOLD, 4);
-});
-
-test('buildSetupPath joins the extension dir and the script name', () => {
-    assert.equal(buildSetupPath('/home/user/.local/share/gnome-shell/extensions/x'),
-        '/home/user/.local/share/gnome-shell/extensions/x/setup-polkit.sh');
-});
-
-test('buildSetupPath tolerates an empty extension path', () => {
-    assert.equal(buildSetupPath(''), 'setup-polkit.sh');
 });
 
 test('handleUninstallNotFound increments and notifies below the threshold', () => {

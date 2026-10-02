@@ -17,6 +17,9 @@ endurance) in the top-bar menu. Targets **GNOME Shell 50/51** (ESM imports
 ## Architecture
 
 ```text
+setup-polkit.sh       # Installs the polkit + wrapper stack (run as root).
+                      #   Lives at the repository root, NOT in the extension
+                      #   dir (never executed from the local extension dir).
 nvme-monitor@rloutrel.github.com/
   extension.js         # GNOME Shell entry point: enable/disable lifecycle only.
   indicator.js         # Panel indicator: menu, device rendering, polling,
@@ -42,7 +45,6 @@ nvme-monitor@rloutrel.github.com/
                        #   buffer.
   stylesheet.css        # Theme-aware styles (no hardcoded colors).
   metadata.json         # Shell version, UUID, version.
-  setup-polkit.sh       # Installs the polkit + wrapper stack (run as root).
   icons/bootstrap/      # Bundled SVG icons (Bootstrap Icons, MIT).
   test/                 # Unit tests (Node built-in runner).
 ```
@@ -248,7 +250,23 @@ Conventional commits, scoped:
 
 ## Polkit stack
 
-`setup-polkit.sh` (run as root via pkexec from the extension) installs:
+The install flow is deliberately not automatic: the extension never executes
+a script from the local extension directory as root. The menu toggle opens a
+dialog that downloads `setup-polkit.sh` from the GitHub repository
+(`setupScriptFetch.js`, libsoup HTTPS), verifies its SHA-256 against the hash
+pinned in `v2script.js` (`SETUP_SCRIPT_SHA256`), presents it read-only for
+review with a copy-to-clipboard button, and runs the reviewed content after
+validation (shebang, size, markers — `v2script.js`), written to a private
+temp file, as root via pkexec (`v2flow.js`). A mismatching hash is refused
+(anti-malicious-commit protection); after a legitimate script change, set
+`SETUP_SCRIPT_SHA256` to the new hash (and optionally keep the old one in
+`SETUP_SCRIPT_SHA256_TRANSITORY` during the update window). If the download
+fails the dialog falls back to manual paste of the script copied on GitHub.
+
+When `setup-polkit.sh` is modified, update the pinned hash:
+`sha256sum setup-polkit.sh`.
+
+`setup-polkit.sh` (run as root via pkexec) installs:
 
 - `/usr/local/bin/nvme-smart-log-json` — wrapper restricted to
   `nvme smart-log -o json /dev/nvme*`

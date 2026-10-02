@@ -6,8 +6,10 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
+import Pango from 'gi://Pango';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import Atk from 'gi://Atk';
 
 import {gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -18,7 +20,6 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {_debug, _warn, notifyError} from './logger.js';
 import {
     runCommandSync,
-    fileExists,
     checkV2Installed,
     checkCurrentUserInSmartGroup,
     checkUninstallAvailable,
@@ -29,10 +30,12 @@ import {createTempChartArea} from './tempChart.js';
 import {buildHealthGauges, getSmartStatusLine} from './smartStatus.js';
 import {
     handleUninstallNotFound,
-    installV2Stack,
+    installV2StackFromPastedScript,
     uninstallV2Stack,
     disableSelfViaDbus,
 } from './v2flow.js';
+import {SETUP_SCRIPT_URL, checkSetupScriptHash} from './v2script.js';
+import {computeSha256, fetchSetupScript} from './setupScriptFetch.js';
 import {
     TEMP_HOT_C,
     isCriticalTemp,
@@ -78,7 +81,7 @@ import { TEMP_UNIT_CELSIUS } from './tempUnit.js';
 // Import rolling per-device temperature history (pure, unit-tested).
 import { TempHistory, TEMP_HISTORY_WINDOW_MS } from './tempHistory.js';
 // Import polkit management (pure, unit-tested)
-import { WRAPPER_PATH, SETUP_SCRIPT_NAME } from './polkitManager.js';
+import { WRAPPER_PATH } from './polkitManager.js';
 
 // Persisted rolling temperature history (last 30 minutes, per device). The file
 // is written atomically by GLib.file_set_contents after each capture so a
@@ -234,6 +237,447 @@ export const DeviceSupportDialog = GObject.registerClass(
     }
 );
 
+// ---------------------------------------------------------------------------
+// Setup script dialog: opened by the "Use NVMe SMART access" toggle
+// when the stack is not installed. The setup script is intentionally NOT
+// shipped/executed from the local extension directory (a local file run as
+// root would be a privilege-escalation vector for anything that can write
+// into it). Instead the dialog downloads the script from the GitHub
+// repository, presents it read-only for review (selectable text and a
+// copy-to-clipboard button), and runs the reviewed content as root via
+// pkexec when the
+// user presses Run. Integrity is checked internally: the fetched script's
+// SHA-256 must match the checksum pinned in the extension (a malicious
+// commit changing the script is refused); a transitory second hash may be
+// approved explicitly once, until the extension ships the new pinned hash.
+// If the download fails the dialog falls back to manual paste.
+// ---------------------------------------------------------------------------
+export const SetupScriptDialog = GObject.registerClass(
+    class SetupScriptDialog extends ModalDialog {
+        _init({attachDrag = null, onRun, copyToClipboard = null, loadMenuIcon = null}) {
+            super._init({styleClass: 'nvme-support-dialog', shellReactive: true}, true);
+            this.reactive = false;
+            this.dialogLayout.reactive = true;
+            this._onRun = onRun;
+            this._copyToClipboard = copyToClipboard;
+            this._scriptContent = '';
+            this._runAllowed = false;
+
+            const content = this.contentLayout;
+
+            const headerBar = new St.BoxLayout({
+                style_class: 'nvme-support-dialog-headerbar',
+            });
+            const title = new St.Label({
+                text: _('Install NVMe SMART access'),
+                style_class: 'nvme-support-dialog-title',
+                x_expand: true,
+            });
+            title.clutter_text.line_wrap = true;
+            headerBar.add_child(title);
+            const closeButton = new St.Button({
+                style_class: 'nvme-support-close-button',
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+            });
+            closeButton.set_child(new St.Label({text: '\u2715'}));
+            closeButton.set_accessible_name(_('Close'));
+            closeButton.connect('clicked', () => this.close());
+            headerBar.add_child(closeButton);
+            if (attachDrag)
+                attachDrag(headerBar, this.dialogLayout);
+            content.add_child(headerBar);
+
+            // The disclaimer and the FAQ share a tabbed layout: one page
+            // visible at a time, inside one capped scroll view. The
+            // disclaimer ("Your action is required") is shown by default.
+            const why = new St.Label({
+                text: _('Enabling SMART access needs a small root component '
+                    + 'to be installed (a wrapper, a system group and a polkit '
+                    + 'policy). This is not 100% automatic, so that the '
+                    + 'extension never runs a local script as root — it might '
+                    + 'have been created by a malicious program. '
+                    + 'Instead, the script below was fetched from GitHub and '
+                    + 'compared to the checksum pinned in the extension: '
+                    + 'review it, then press Run to install it as sudo '
+                    + '(pkexec). You will need to log out and back in '
+                    + 'afterwards, for the group rights to be applied.'),
+                style_class: 'nvme-support-dialog-body',
+            });
+            const whyCaveat = new St.Label({
+                text: _('This is still not ideal: a modification of the '
+                    + 'extension could call pkexec with a locally created '
+                    + 'script, different from the one shown. Therefore the '
+                    + 'safest way is to download the script yourself (see '
+                    + 'the link below) and run it with pkexec on your own.'),
+                style_class: 'nvme-setup-disclaimer-caveat',
+            });
+            why.clutter_text.line_wrap = true;
+            whyCaveat.clutter_text.line_wrap = true;
+            // Keep the wrapped lines: without this the label ellipsizes
+            // ('...') and its natural height collapses to the visible box,
+            // hiding the overflow from the scroll adjustment.
+            why.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+            whyCaveat.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+            const whyPage = new St.BoxLayout({vertical: true});
+            whyPage.add_child(why);
+            whyPage.add_child(whyCaveat);
+
+            const faqBox = new St.BoxLayout({
+                vertical: true,
+                style_class: 'nvme-setup-faq-box',
+            });
+            const faqEntries = [
+                {
+                    question: _('Why are polkit rules required?'),
+                    answer: _('Reading the SMART log requires root rights. '
+                        + 'The polkit action lets the extension run the wrapper '
+                        + 'as root via pkexec without a password prompt on every '
+                        + 'read; a second action allows the uninstaller to run '
+                        + 'the same way. The initial install itself is not '
+                        + 'covered by these rules: it runs once via pkexec with '
+                        + 'your password.'),
+                },
+                {
+                    question: _('Why create a group?'),
+                    answer: _('The polkit rules would otherwise grant passwordless '
+                        + 'root execution to every user of the machine. '
+                        + 'Restricting them to members of the nvme-smart group, '
+                        + 'from a local and active session, limits the grant to '
+                        + 'the user who installed the component.'),
+                },
+                {
+                    question: _('Why a wrapper?'),
+                    answer: _('A polkit action is bound to one exact executable. '
+                        + 'The wrapper hardcodes the resolved nvme binary path '
+                        + 'and only accepts smart-log -o json on /dev/nvme* '
+                        + 'devices, so the granted root access cannot be turned '
+                        + 'into an arbitrary command.'),
+                },
+            ];
+            for (const entry of faqEntries) {
+                const question = new St.Label({
+                    text: entry.question,
+                    style_class: 'nvme-setup-faq-question',
+                });
+                const answer = new St.Label({
+                    text: entry.answer,
+                    style_class: 'nvme-setup-faq-answer',
+                });
+                question.clutter_text.line_wrap = true;
+                answer.clutter_text.line_wrap = true;
+                // Same wrapping pitfall as the disclaimer labels.
+                question.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+                answer.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+                faqBox.add_child(question);
+                faqBox.add_child(answer);
+            }
+            faqBox.hide();
+            this._faqBox = faqBox;
+
+            // Tab row: one toggle button per page; the active one carries
+            // the -active style class.
+            const tabRow = new St.BoxLayout({
+                style_class: 'nvme-setup-tab-row',
+            });
+            const actionTab = new St.Button({
+                style_class: 'nvme-setup-tab nvme-setup-tab-active',
+                label: _('Your action is required'),
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+                x_expand: true,
+            });
+            const faqTab = new St.Button({
+                style_class: 'nvme-setup-tab',
+                label: _('FAQ'),
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+                x_expand: true,
+            });
+            actionTab.set_accessible_role(Atk.Role.TAB);
+            faqTab.set_accessible_role(Atk.Role.TAB);
+            tabRow.add_child(actionTab);
+            tabRow.add_child(faqTab);
+            content.add_child(tabRow);
+
+            // Both pages live in the same capped scroll view: 10 lines
+            // visible, anything longer scrolls. A wrapping label's minimum
+            // height is a single line, so AUTOMATIC never detects the
+            // overflow; ALWAYS shows the bar and the adjustment scrolls
+            // over the natural height.
+            const infoScroll = new St.ScrollView({
+                style_class: 'nvme-setup-disclaimer-scroll',
+                overlay_scrollbars: false,
+                hscrollbar_policy: St.PolicyType.NEVER,
+                vscrollbar_policy: St.PolicyType.ALWAYS,
+            });
+            const infoContent = new St.BoxLayout({vertical: true});
+            infoContent.add_child(whyPage);
+            infoContent.add_child(faqBox);
+            infoScroll.set_child(infoContent);
+            content.add_child(infoScroll);
+
+            actionTab.connect('clicked', () =>
+                this._selectInfoTab(actionTab, faqTab, whyPage, faqBox));
+            faqTab.connect('clicked', () =>
+                this._selectInfoTab(faqTab, actionTab, faqBox, whyPage));
+            this._infoScroll = infoScroll;
+
+            const urlBox = new St.BoxLayout({
+                style_class: 'nvme-setup-script-link-box',
+            });
+            const urlText = new St.Label({
+                text: _('Script location: %s').format(SETUP_SCRIPT_URL),
+                style_class: 'nvme-support-dialog-manufacturers',
+                x_expand: true,
+            });
+            urlText.clutter_text.line_wrap = true;
+            urlBox.add_child(urlText);
+            // Only the icon is clickable: it opens the script page in the
+            // browser. External-open icon candidates:
+            //   bundled: ICONS.BoxArrowUpRight via loadMenuIcon
+            //   system:  'window-open-new-symbolic'
+            //   system:  'web-browser-symbolic' (generic 'opens online')
+            const urlIcon = new St.Icon({
+                gicon: loadMenuIcon
+                    ? loadMenuIcon(ICONS.BoxArrowUpRight)
+                    : null,
+                icon_name: loadMenuIcon ? null : 'window-open-new-symbolic',
+                icon_size: 14,
+            });
+            const urlButton = new St.Button({
+                style_class: 'nvme-setup-script-link',
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+            });
+            urlButton.set_child(urlIcon);
+            urlButton.set_accessible_name(_('Open the script on GitHub'));
+            urlButton.connect('clicked', () => {
+                try {
+                    Gio.AppInfo.launch_default_for_uri(SETUP_SCRIPT_URL, null);
+                } catch (e) {
+                    _warn(`failed to open setup script URL: ${e.message}`);
+                }
+            });
+            urlBox.add_child(urlButton);
+            content.add_child(urlBox);
+
+            this._integrityLabel = new St.Label({
+                text: _('Fetching the setup script\u2026'),
+                style_class: 'nvme-setup-status',
+            });
+            this._integrityLabel.clutter_text.line_wrap = true;
+            content.add_child(this._integrityLabel);
+
+            const scriptTitle = new St.Label({
+                text: _('Script content:'),
+                style_class: 'nvme-support-json-title',
+                x_expand: true,
+            });
+
+            const scriptHeader = new St.BoxLayout({
+                style_class: 'nvme-support-json-header',
+                x_expand: true,
+            });
+            scriptHeader.add_child(scriptTitle);
+            const copyButton = new St.Button({
+                style_class: 'nvme-support-copy-button',
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+            });
+            copyButton.set_child(new St.Icon({
+                icon_name: 'edit-copy-symbolic',
+                icon_size: VALUE_ICON_SIZE,
+            }));
+            copyButton.set_accessible_name(_('Copy to clipboard'));
+            copyButton.connect('clicked', () => {
+                if (this._copyToClipboard)
+                    this._copyToClipboard(this._getScriptContent(), copyButton);
+            });
+            scriptHeader.add_child(copyButton);
+
+            const scriptText = new St.Label({
+                text: '',
+                style_class: 'nvme-support-json',
+            });
+            scriptText.reactive = true;
+            const text = scriptText.clutter_text;
+            text.reactive = true;
+            text.line_wrap = false;
+            text.editable = false;
+            text.selectable = true;
+            text.single_line_mode = false;
+            // Without this the label ellipsizes long lines ('...') and never
+            // reports its natural width, so the horizontal scrollbar sees
+            // nothing to scroll.
+            text.ellipsize = Pango.EllipsizeMode.NONE;
+            const selBg = new Cogl.Color({red: 211, green: 211, blue: 211, alpha: 255});
+            const selText = new Cogl.Color({red: 0, green: 0, blue: 0, alpha: 255});
+            text.selection_background_color = selBg;
+            text.selected_text_color = selText;
+            this._scriptLabel = scriptText;
+
+            // Hidden multi-line entry used as the manual-paste fallback when
+            // the automatic download fails: the user pastes the script copied
+            // from GitHub and the same Run flow applies.
+            const pasteEntry = new St.Entry({
+                style_class: 'nvme-setup-script-entry',
+            });
+            const entryText = pasteEntry.clutter_text;
+            entryText.editable = true;
+            entryText.single_line_mode = false;
+            entryText.line_wrap = true;
+            entryText.reactive = true;
+            entryText.selection_background_color = selBg;
+            entryText.selected_text_color = selText;
+            pasteEntry.hide();
+            this._pasteEntry = pasteEntry;
+
+            // Only the code area scrolls: the header stays fixed above it,
+            // so the scrollbar applies to the script text alone.
+            const codeContent = new St.BoxLayout({
+                vertical: true,
+                style_class: 'nvme-support-json-content',
+            });
+            codeContent.add_child(scriptText);
+            codeContent.add_child(pasteEntry);
+            const scrollView = new St.ScrollView({
+                style_class: 'nvme-setup-script-scroll',
+                overlay_scrollbars: false,
+                hscrollbar_policy: St.PolicyType.ALWAYS,
+                vscrollbar_policy: St.PolicyType.AUTOMATIC,
+            });
+            scrollView.set_child(codeContent);
+
+            const frame = new St.BoxLayout({
+                vertical: true,
+                style_class: 'nvme-support-json-frame',
+            });
+            frame.add_child(scriptHeader);
+            frame.add_child(scrollView);
+            content.add_child(frame);
+
+            this.setButtons([
+                {
+                    label: _('Cancel'),
+                    action: () => this.close(),
+                    key: Clutter.KEY_Escape,
+                    isDefault: false,
+                },
+                {
+                    label: _('Run'),
+                    action: () => {
+                        if (this._runAllowed)
+                            this._onRun(this._getScriptContent());
+                    },
+                    style_class: 'nvme-support-issue-button',
+                    isDefault: true,
+                },
+            ]);
+        }
+
+        // Switch the info area to `page`: move it into the scroll view,
+        // update the tab style classes and scroll back to the top.
+        _selectInfoTab(tab, otherTab, page, otherPage) {
+            if (page.visible)
+                return;
+            page.show();
+            otherPage.hide();
+            tab.add_style_class_name('nvme-setup-tab-active');
+            otherTab.remove_style_class_name('nvme-setup-tab-active');
+            const vadj = this._infoScroll.vscroll.adjustment;
+            vadj.value = vadj.lower;
+        }
+
+        // Current script content: the fetched text, or the pasted text in
+        // the manual fallback.
+        _getScriptContent() {
+            if (this._pasteEntry.visible)
+                return this._pasteEntry.get_text();
+            return this._scriptContent;
+        }
+
+        // Fill the read-only review area with the fetched script. `hashStatus`
+        // is the v2script.js check result: 'pinned' (trusted checksum),
+        // 'transitory' (new script pending an extension update; the user must
+        // explicitly approve it once) or 'unknown' (refused).
+        presentFetchedScript(content, hashStatus) {
+            this._scriptContent = content;
+            this._scriptLabel.text = content;
+            this._integrityLabel.show();
+            if (hashStatus === 'pinned') {
+                this._runAllowed = true;
+                this._setStatusLabel(_('Checksum verified: the fetched script '
+                    + 'matches the SHA-256 pinned in this extension.'), 'ok');
+            } else if (hashStatus === 'transitory') {
+                this._integrityLabel.text = _('The setup script was updated on GitHub '
+                    + 'after this extension version was released, and its checksum '
+                    + 'is only approved temporarily. You can review and run it now; '
+                    + 'update the extension when a newer version is available.');
+                this._runAllowed = true;
+            } else {
+                this._setStatusLabel(_('The fetched script does not match the '
+                    + 'checksum pinned in this extension version: it may have been '
+                    + 'modified on GitHub. For safety it cannot be run. Update the '
+                    + 'extension to get the newly pinned checksum.'), 'error');
+                this._runAllowed = false;
+            }
+        }
+
+        // One-line feedback for the install steps triggered by Run: keeps the
+        // user informed about what the dialog is currently doing. `tone` is
+        // 'ok' (dark green), 'error' (dark red) or null (neutral).
+        presentStep(message, tone = null) {
+            this._integrityLabel.show();
+            this._setStatusLabel(message, tone);
+        }
+
+        // Update the status label text and its ok/error tone.
+        _setStatusLabel(text, tone) {
+            this._integrityLabel.text = text;
+            this._integrityLabel.remove_style_class_name('nvme-setup-status-ok');
+            this._integrityLabel.remove_style_class_name('nvme-setup-status-error');
+            if (tone === 'ok')
+                this._integrityLabel.add_style_class_name('nvme-setup-status-ok');
+            else if (tone === 'error')
+                this._integrityLabel.add_style_class_name('nvme-setup-status-error');
+        }
+
+        // Download failed: switch the dialog to the manual paste fallback.
+        presentFetchError(errorMessage) {
+            this._scriptContent = '';
+            this._integrityLabel.text = errorMessage === 'HTTP 404'
+                ? _('The script was not found at its expected location (%s). '
+                    + 'It is published with the extension version that ships '
+                    + 'it, so it may not be available there yet. Please open '
+                    + 'the location link above, copy the whole file and paste '
+                    + 'it below instead.').format(errorMessage)
+                : _('The script could not be fetched automatically (%s). '
+                    + 'Please open it on GitHub, copy the whole file and paste '
+                    + 'it below.').format(errorMessage);
+            this._scriptLabel.hide();
+            this._pasteEntry.show();
+            this._runAllowed = true;
+        }
+
+        // Show without the modal grab, matching DeviceSupportDialog: the
+        // session stays interactive (the pkexec prompt must be reachable).
+        openNonModal() {
+            if (this.state === null || this.state === undefined)
+                return;
+            this._monitorConstraint.index = global.display.get_current_monitor();
+            this.show();
+            this.opacity = 255;
+            this._setState(0);
+        }
+    }
+);
+
 export const Indicator = GObject.registerClass(
     class Indicator extends PanelMenu.Button {
         _init({extensionPath = '', openPreferences = null} = {}) {
@@ -273,32 +717,44 @@ export const Indicator = GObject.registerClass(
 
             // ---------------------------------------------------------------
             // Menu structure:
-            //   [Enable NVMe smart-log access toggle]
+            //   [Use NVMe SMART access toggle]
             //   [separator]
             //   [device section]  ← dynamically rebuilt on menu open
             // ---------------------------------------------------------------
 
             // ---------------------------------------------------------------
-            // v2: NVMe smart-log access toggle (install/uninstall polkit stack)
+            // v2: NVMe SMART access toggle (install/uninstall polkit stack)
             // ---------------------------------------------------------------
             const v2Installed = checkV2Installed();
             _debug(`init: isV2Installed=${v2Installed}`);
 
             this._v2Updating = false;
+            // Logical stack state the extension expects. The 'toggled' signal
+            // is also emitted for programmatic state changes (Switch emits
+            // notify::state on every assignment), so the handler compares the
+            // reported state against this target to tell user actions apart
+            // from echoes of _updateV2ToggleState().
+            this._v2DesiredState = v2Installed;
 
-            this._v2Toggle = new PopupSwitchMenuItem(_('Enable NVMe smart-log access'), v2Installed);
+            this._v2Toggle = new PopupSwitchMenuItem(_('Use NVMe SMART access'), v2Installed);
 
-            // If the stack is NOT installed and setup-polkit.sh is missing,
-            // the user cannot install — disable the toggle entirely.
-            // (check deferred to _checkSetupScript() called from enable())
 
             this._v2ToggleHandlerId = this._v2Toggle.connect('toggled', (item, state) => {
-                _debug(`toggled(state=${state}) _v2Updating=${this._v2Updating}`);
+                _debug(`toggled(state=${state}) desired=${this._v2DesiredState} _v2Updating=${this._v2Updating}`);
+                // 'toggled' is re-emitted for programmatic state changes;
+                // anything matching the expected state is such an echo.
+                if (state === this._v2DesiredState)
+                    return;
                 if (this._v2Updating) return;
                 this._v2Updating = true;
 
                 if (state) {
-                    this._installV2Stack();
+                    // Install goes through the fetch-and-review dialog. Flip
+                    // the switch back off until the stack is really installed
+                    // (desired state becomes false, so the echo is ignored).
+                    this._updateV2ToggleState(false);
+                    this._v2Updating = false;
+                    this._showSetupScriptDialog();
                 } else {
                     this._uninstallV2Stack();
                 }
@@ -419,19 +875,6 @@ export const Indicator = GObject.registerClass(
         }
 
         // -------------------------------------------------------------------
-        // Check if setup-polkit.sh exists; disable toggle if not installed
-        // and script is missing. Called from enable() after path is set.
-        // -------------------------------------------------------------------
-        _checkSetupScript() {
-            if (checkV2Installed()) return;
-            const setupPath = GLib.build_filenamev([this._extensionPath || '', SETUP_SCRIPT_NAME]);
-            if (!fileExists(setupPath)) {
-                _warn('setup-polkit.sh missing — disabling toggle');
-                this._v2Toggle.setSensitive(false);
-            }
-        }
-
-        // -------------------------------------------------------------------
         // Fetch NVMe device list once and cache it.
         // Returns the cached devices or null on failure.
         // -------------------------------------------------------------------
@@ -483,6 +926,12 @@ export const Indicator = GObject.registerClass(
         // dedicated 500ms refresh (see _syncCriticalTimers).
         // -------------------------------------------------------------------
         _refreshDevices() {
+            // Re-sync the toggle with the installed stack: the state can
+            // change outside the extension (manual uninstall script).
+            const v2Now = checkV2Installed();
+            if (v2Now !== this._v2DesiredState && !this._v2Updating)
+                this._updateV2ToggleState(v2Now);
+
             // Clear previous content and drop stale chart references; new
             // charts are re-registered as they are added below.
             this._destroyHoverTooltips();
@@ -587,6 +1036,10 @@ export const Indicator = GObject.registerClass(
                 });
                 return Clutter.EVENT_PROPAGATE;
             });
+            // If the dragged actor is destroyed mid-drag (dialog closed),
+            // release the stage handlers: otherwise every mouse move keeps
+            // setting translation properties on the disposed actor.
+            handle.connect('destroy', () => endDrag());
         }
 
         // -------------------------------------------------------------------
@@ -1038,7 +1491,7 @@ export const Indicator = GObject.registerClass(
                               'Critical below 15%, warning below 50%, OK otherwise.'),
                 usedBody: _('Estimated portion of the drive endurance consumed. ' +
                             'OK below 50%, warning up to 85%, critical above.'),
-                install: _('  Install NVMe Stack for SMART data'),
+                install: _('  Install the NVMe SMART stack'),
                 parseError: _('  SMART: parse error'),
                 relogin: _('  SMART: log out and back in to enable access'),
                 unavailable: _('  SMART: unavailable'),
@@ -1846,22 +2299,72 @@ export const Indicator = GObject.registerClass(
         // _v2Updating guard. Set the internal state + visual switch directly.
         // -------------------------------------------------------------------
         _updateV2ToggleState(active) {
+            this._v2DesiredState = active;
             this._v2Toggle._state = active;
             if (this._v2Toggle._switch)
                 this._v2Toggle._switch.state = active;
-            _debug(`_updateV2ToggleState(${active}) — state set directly, no signal emitted`);
+            _debug(`_updateV2ToggleState(${active}) — desired state updated`);
         }
 
         // -------------------------------------------------------------------
-        // v2: Install the new polkit stack via setup-polkit.sh
+        // v2: open the setup-script dialog (toggle install path). The dialog
+        // stays open when the pasted content is rejected; on success the
+        // toggle flips on and polling starts (ui.onInstalled).
         // -------------------------------------------------------------------
-        _installV2Stack() {
-            installV2Stack({
-                extensionPath: this._extensionPath,
-                wasInSmartGroup: checkCurrentUserInSmartGroup(),
-                ui: this._v2Ui(),
+        _showSetupScriptDialog() {
+            this.menu.close();
+            if (this._setupDialog) {
+                try {
+                    this._setupDialog.close();
+                } catch (e) {
+                    _debug(`stale setup dialog close skipped: ${e.message}`);
+                }
+                this._setupDialog = null;
+            }
+            const dialog = new SetupScriptDialog({
+                attachDrag: (handle, movedActor) => this._attachDragHandler(handle, movedActor),
+                loadMenuIcon: iconName => this._loadMenuIconByName(iconName),
+                onRun: scriptContent => {
+                    dialog.presentStep(_('Running the installer (pkexec)\u2026'));
+                    const started = installV2StackFromPastedScript({
+                        scriptContent,
+                        wasInSmartGroup: checkCurrentUserInSmartGroup(),
+                        ui: this._v2Ui(),
+                    });
+                    if (!started)
+                        dialog.presentStep(
+                            _('The script was rejected before execution.'), 'error');
+                    else
+                        dialog.close();
+                },
+                copyToClipboard: (text, button) => {
+                    const clipboard = St.Clipboard.get_default();
+                    clipboard.set_text(St.ClipboardType.CLIPBOARD, text || '');
+                    this._showCopiedFeedback(button);
+                },
+            });
+            dialog.openNonModal();
+            this._setupDialog = dialog;
+            // Drop the reference when the dialog is destroyed (closed), so a
+            // late fetch callback never touches destroyed St.Labels (which
+            // triggers spurious clutter_actor_allocate warnings).
+            dialog.connect('destroy', () => {
+                if (this._setupDialog === dialog)
+                    this._setupDialog = null;
+            });
+            fetchSetupScript().then(content => {
+                if (dialog !== this._setupDialog)
+                    return;
+                const {status} = checkSetupScriptHash(computeSha256(content));
+                _debug(`setup script fetch: sha256 status=${status}`);
+                dialog.presentFetchedScript(content, status);
+            }).catch(e => {
+                _warn(`setup script fetch failed: ${e.message}`);
+                if (dialog === this._setupDialog)
+                    dialog.presentFetchError(e.message);
             });
         }
+
         // -------------------------------------------------------------------
         // v2: Uninstall the polkit stack via nvme-smart-uninstall.sh
         // -------------------------------------------------------------------

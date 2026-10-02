@@ -56,7 +56,7 @@ The runner mirrors the repository’s real checks locally:
   `nvme-monitor@rloutrel.github.com/test/`
 - `node --check` for each non-test JavaScript file in the extension directory
 - `node nvme-monitor@rloutrel.github.com/test/validateMetadata.js`
-- `shellcheck nvme-monitor@rloutrel.github.com/setup-polkit.sh`
+- `shellcheck setup-polkit.sh`
 - `eslint` when dependencies are installed
 
 This repo’s unit tests are Node-only and intentionally avoid a UI runtime;
