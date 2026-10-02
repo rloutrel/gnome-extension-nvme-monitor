@@ -38,6 +38,19 @@
     opacity: 0.6;
 }
 
+/* Meta line row: label + optional firmware-update button */
+.nvme-meta-line {
+    spacing: 6px;
+}
+.nvme-meta-line .nvme-support-button {
+    min-width: 22px;
+    min-height: 22px;
+    margin: 0;
+}
+.nvme-meta-line .nvme-support-button St.Icon {
+    padding: 2px;
+}
+
 /* SMART attribute lines */
 .nvme-smart-attr {
     font-size: 0.95em;
@@ -245,7 +258,7 @@
 }
 
 .nvme-support-json-scroll {
-    height: 10em;
+    max-height: 10em;
 }
 
 .nvme-support-json {

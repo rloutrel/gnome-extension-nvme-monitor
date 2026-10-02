@@ -47,6 +47,8 @@ import {computeOverlayPosition} from './overlayGeometry.js';
 
 // Import the SMART parser
 import { parseSmart, detectManufacturer, getSupportLevel, SUPPORTED_MANUFACTURERS } from './smartParser.js';
+// Import the firmware registry helpers (pure, unit-tested)
+import { assessFirmware } from './firmwareRegistry.js';
 // Validated-devices registry (ModelNumber -> manufacturer), loaded at
 // runtime because GJS in GNOME Shell 50 does not support JSON import
 // attributes. Falls back to an empty registry if the file is unreadable.
@@ -66,6 +68,72 @@ function loadValidatedDevices() {
     }
 }
 const VALIDATED_DEVICES = loadValidatedDevices();
+
+// ---------------------------------------------------------------------------
+// Controller PCI device ID for a device path (e.g. '/dev/nvme0' ->
+// '0xa808'), read unprivileged from sysfs. Samsung ships hardware
+// revisions under the same ModelNumber (e.g. 970 EVO Plus Phoenix vs
+// Elpis), each with its own firmware line; the PCI device ID is the
+// discriminator the registry's per-revision firmware data keys on.
+// Returns '' when the sysfs files are unreadable (non-pci transport or
+// unexpected layout), letting the firmware check degrade to 'unknown'.
+// ---------------------------------------------------------------------------
+function readPciDeviceId(devicePath) {
+    // `nvme list -o json` reports namespace paths (/dev/nvme1n1), but sysfs
+    // indexes controllers (/sys/class/nvme/nvme1); strip the namespace suffix.
+    const name = String(devicePath || '')
+        .replace(/^\/dev\//, '')
+        .replace(/n\d+$/, '');
+    try {
+        const vendorFile = Gio.File.new_for_path(`/sys/class/nvme/${name}/device/vendor`);
+        const deviceFile = Gio.File.new_for_path(`/sys/class/nvme/${name}/device/device`);
+        const [vendorOk, vendorContents] = vendorFile.load_contents(null);
+        const [deviceOk, deviceContents] = deviceFile.load_contents(null);
+        if (!vendorOk || !deviceOk)
+            return '';
+        const decoder = new TextDecoder();
+        const vendor = decoder.decode(vendorContents).trim();
+        const device = decoder.decode(deviceContents).trim();
+        if (vendor === '' || device === '')
+            return '';
+        return `0x${parseInt(device, 16).toString(16)}`;
+    } catch (e) {
+        _warn(`Failed to read PCI device ID for ${name}: ${e}`);
+        return '';
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PCI bus address of an NVMe controller (e.g. '/dev/nvme0' -> '0000:01:00.0'),
+// resolved from the sysfs symlink /sys/class/nvme/<name>/device. Returns ''
+// when the address cannot be resolved.
+// ---------------------------------------------------------------------------
+function readPciAddress(devicePath) {
+    const name = String(devicePath || '')
+        .replace(/^\/dev\//, '')
+        .replace(/n\d+$/, '');
+    try {
+        // /sys/class/nvme/<name>/device is a relative symlink to the
+        // controller's PCI device directory; follow it to read the target.
+        const deviceLink = GLib.build_filenamev(['/sys/class/nvme', name, 'device']);
+        const target = GLib.file_read_link(deviceLink);
+        if (!target)
+            return '';
+        // The symlink points into the controller's PCI device directory:
+        // ../../../devices/pci0000:00/0000:04:00.0/nvme/nvme1. Scan the
+        // target components for the PCI bus address pattern instead of
+        // assuming its position (the exact layout varies).
+        const parts = target.split('/');
+        for (let i = parts.length - 1; i >= 0; i--) {
+            if (/^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-9a-f]$/i.test(parts[i]))
+                return parts[i].toLowerCase();
+        }
+        return '';
+    } catch (e) {
+        _warn(`Failed to read PCI address for ${name}: ${e}`);
+        return '';
+    }
+}
 
 // Import endurance value formatting + temperature tier color (pure, unit-tested)
 import { formatCompactNumber, formatDataUnits, formatPowerOnHours, COLOR_TRACK } from './format.js';
@@ -112,6 +180,11 @@ const PANEL_WARNING_CLASS = 'nvme-panel-warning';
 // so the user lands directly on the form to fill in.
 const SUPPORT_ISSUE_URL =
     'https://github.com/rloutrel/gnome-extension-nvme-monitor/issues/new?template=support-new-device.yml';
+// Firmware download pages per manufacturer, opened when a drive reports a
+// firmware older than the last known version in the registry.
+const FIRMWARE_PAGE_URLS = Object.freeze({
+    Samsung: 'https://semiconductor.samsung.com/consumer-storage/support/tools/',
+});
 // Max characters of the SMART JSON shown in the support overlay before the
 // text is ellipsized; the full text is always copied to the clipboard.
 const SUPPORT_JSON_PREVIEW_CHARS = 1500;
@@ -131,7 +204,7 @@ let _uninstallNotFoundCount = 0;
 // ---------------------------------------------------------------------------
 export const DeviceSupportDialog = GObject.registerClass(
     class DeviceSupportDialog extends ModalDialog {
-        _init({smartRaw, listRaw, modelNumber, supportLevel = 'report', createCopyableJsonBox, openSupportIssue, attachDrag = null}) {
+        _init({smartRaw, listRaw, lspciRaw = null, modelNumber, supportLevel = 'report', createCopyableJsonBox, openSupportIssue, attachDrag = null}) {
             super._init({styleClass: 'nvme-support-dialog', shellReactive: true}, true);
             this.reactive = false;
             this.dialogLayout.reactive = true;
@@ -201,11 +274,17 @@ export const DeviceSupportDialog = GObject.registerClass(
                 text: _('Output of nvme smart-log:'),
                 style_class: 'nvme-support-json-title',
             });
+            const lspciTitle = new St.Label({
+                text: _('Controller PCI device ID:'),
+                style_class: 'nvme-support-json-title',
+            });
             const jsonText = smartRaw ? JSON.stringify(smartRaw, null, 2) : '';
             content.add_child(this._createCopyableJsonBox(
                 listTitle, listRaw || '', 'nvme list -o json'));
             content.add_child(this._createCopyableJsonBox(
                 smartTitle, jsonText, 'sudo nvme smart-log [device_path] -o json'));
+            content.add_child(this._createCopyableJsonBox(
+                lspciTitle, lspciRaw || '', 'lspci -nn | grep -i nvme'));
 
             this.setButtons([
                 {
@@ -761,11 +840,9 @@ export const Indicator = GObject.registerClass(
             });
             // Gear button at the right of the toggle row: opens the
             // extension preferences window (temperature unit, ...).
-            const gearIcon = this._loadMenuIconByName(ICONS.Gear);
             this._prefsButton = new St.Button({
                 child: new St.Icon({
-                    gicon: gearIcon,
-                    icon_name: gearIcon ? null : 'emblem-system-symbolic',
+                    icon_name: 'emblem-system-symbolic',
                     icon_size: SECTION_ICON_SIZE,
                 }),
                 can_focus: true,
@@ -1081,7 +1158,7 @@ export const Indicator = GObject.registerClass(
             // Device header: icon + bold model name + health gauges. The
             // support "!" button opens the device-support call to action
             // overlay: yellow when the manufacturer is supported but the
-            // exact model is not validated yet (ask to confirm the
+            // exact model is not confirmed working yet (ask to confirm the
             // rendering), red when the device seems badly handled (ask to
             // provide information).
             const support = this._unknownDeviceSupport(parsedSmart, smartObj, dev, smartParseError);
@@ -1090,9 +1167,13 @@ export const Indicator = GObject.registerClass(
                 healthGauges,
                 support);
 
-            // Device path + firmware (dimmed), with the disk usage bar above it.
+            // Device path + firmware (dimmed), with the disk usage bar above
+            // it, plus a red firmware button when the registry knows a newer
+            // firmware for this device's hardware revision.
             const diskUsage = this._collectDiskUsageInfo(dev.DevicePath, lvmInfo);
-            this._addDeviceMeta(dev.DevicePath, dev.Firmware, null, diskUsage);
+            this._addDeviceMeta(
+                dev.DevicePath, dev.Firmware, null, diskUsage,
+                this._firmwareButtonFor(dev));
 
             if (v2Installed && smartObj && !smartParseError) {
                 this._addSmartInfo(smartObj, dev.ModelNumber);
@@ -1140,8 +1221,16 @@ export const Indicator = GObject.registerClass(
             const manufacturer = parsedSmart
                 ? parsedSmart.manufacturer
                 : detectManufacturer(dev.ModelNumber || '');
+            // The controller PCI device ID discriminates hardware
+            // revisions under the same ModelNumber; known models with an
+            // unregistered revision get the orange '!' so their owners
+            // report the revision and we can document it.
+            const pciDeviceId = readPciDeviceId(dev.DevicePath);
+            _debug(`support level: model='${dev.ModelNumber || ''}' `
+                + `pciDeviceId='${pciDeviceId}' manufacturer='${manufacturer}'`);
             const level = getSupportLevel(
-                dev.ModelNumber || '', manufacturer, smartParseError, VALIDATED_DEVICES);
+                dev.ModelNumber || '', manufacturer, smartParseError, VALIDATED_DEVICES,
+                pciDeviceId);
             if (level === 'validated')
                 return null;
             let listRaw = this._cachedListJson;
@@ -1151,9 +1240,63 @@ export const Indicator = GObject.registerClass(
             return {
                 smartRaw,
                 listRaw,
+                lspciRaw: this._fetchPciDeviceId(dev.DevicePath),
                 modelNumber: dev.ModelNumber || '',
                 supportLevel: level,
             };
+        }
+
+        // -------------------------------------------------------------------
+        // Controller PCI device ID of this drive, in the 'vendor:device'
+        // form lspci prints (e.g. '144d:a808'). This is the key the
+        // validated-devices registry's per-revision entries are indexed
+        // on, so it is the main data point to collect for a support ticket.
+        // Primary source: sysfs (no external binary needed); fallback:
+        // extract the [vendor:device] token from this drive's line in the
+        // `lspci -nn` output. Returns null when both fail.
+        // -------------------------------------------------------------------
+        _fetchPciDeviceId(devicePath) {
+            // Primary: sysfs. readPciDeviceId() returns the bare device ID
+            // (e.g. '0xa808'); combine it with the vendor file's value to
+            // build the 'vendor:device' form (144d:a808).
+            const name = String(devicePath || '')
+                .replace(/^\/dev\//, '')
+                .replace(/n\d+$/, '');
+            try {
+                const [vendorOk, vendorContents] = Gio.File
+                    .new_for_path(`/sys/class/nvme/${name}/device/vendor`)
+                    .load_contents(null);
+                const deviceId = readPciDeviceId(devicePath);
+                if (vendorOk && deviceId !== '') {
+                    const vendor = new TextDecoder().decode(vendorContents).trim();
+                    const vendorHex = vendor.replace(/^0x/, '').toLowerCase();
+                    const deviceHex = deviceId.replace(/^0x/, '');
+                    return `${vendorHex}:${deviceHex}`;
+                }
+            } catch (e) {
+                _warn(`support dialog: sysfs PCI ID read failed for ${name}: ${e}`);
+            }
+            // Fallback: this drive's `lspci -nn` line, extracting the
+            // [vendor:device] token from the trailing brackets.
+            const lspciBin = GLib.find_program_in_path('lspci');
+            if (!lspciBin) {
+                _warn('support dialog: lspci binary not found in PATH');
+                return null;
+            }
+            const result = runCommandSync([lspciBin, '-nn']);
+            if (!result.ok || result.exitCode !== 0) {
+                _warn(`support dialog: lspci failed: exit=${result.exitCode} stderr=${result.stderr.substring(0, 200) || '(empty)'}`);
+                return null;
+            }
+            const pciAddress = readPciAddress(devicePath);
+            if (pciAddress === '')
+                return null;
+            const shortAddress = pciAddress.replace(/^0000:/, '');
+            const line = result.stdout
+                .split('\n')
+                .find(l => l.trim().startsWith(shortAddress));
+            const match = line ? line.match(/\[([0-9a-f]{4}:[0-9a-f]{4})\]$/) : null;
+            return match ? match[1].toLowerCase() : null;
         }
 
         // -------------------------------------------------------------------
@@ -1385,7 +1528,7 @@ export const Indicator = GObject.registerClass(
         // Add the device metadata line and one interactive usage row per
         // matching mounted partition.
         // -------------------------------------------------------------------
-        _addDeviceMeta(devicePath, firmware, gauges = null, diskUsage = null) {
+        _addDeviceMeta(devicePath, firmware, gauges = null, diskUsage = null, firmwareButton = null) {
             const item = new PopupBaseMenuItem({ reactive: false, can_focus: false });
             const gaugeList = gauges || [];
             const content = new St.BoxLayout({ x_expand: true, style_class: 'nvme-meta-columns' });
@@ -1400,10 +1543,14 @@ export const Indicator = GObject.registerClass(
                 this._attachPartitionUsageInteraction(usageBar, diskUsage);
                 leftColumn.add_child(usageBar);
             }
+            const metaBox = new St.BoxLayout({ x_expand: true, style_class: 'nvme-meta-line' });
             const meta = new St.Label({ text: `${devicePath} \u2014 FW: ${firmware}`, x_expand: true });
             meta.add_style_class_name('nvme-device-meta');
             meta.y_align = Clutter.ActorAlign.CENTER;
-            leftColumn.add_child(meta);
+            metaBox.add_child(meta);
+            if (firmwareButton)
+                metaBox.add_child(firmwareButton);
+            leftColumn.add_child(metaBox);
             content.add_child(leftColumn);
 
             const rightColumn = new St.BoxLayout({
@@ -1593,7 +1740,47 @@ export const Indicator = GObject.registerClass(
         // (report the device), the SMART JSON to attach, the supported
         // manufacturer list, and the GitHub issue deep link.
         // -------------------------------------------------------------------
-        _createUnknownDeviceButton({smartRaw, listRaw, modelNumber, supportLevel}) {
+        // -------------------------------------------------------------------
+        // Red button shown next to the firmware line when the reported
+        // firmware does not match the last known version for the device.
+        // Returns null when the registry has no firmware data for the
+        // device (or its hardware revision, matched via the controller's
+        // PCI device ID read from sysfs), so nothing is rendered.
+        // -------------------------------------------------------------------
+        _firmwareButtonFor(dev) {
+            const entry = VALIDATED_DEVICES[String(dev.ModelNumber || '').trim()];
+            if (!entry)
+                return null;
+            const pciDeviceId = readPciDeviceId(dev.DevicePath);
+            if (assessFirmware(entry, dev.Firmware, pciDeviceId) !== 'outdated')
+                return null;
+            return this._createFirmwareButton(entry.manufacturer);
+        }
+
+        // The button itself: opens the manufacturer's firmware download page.
+        _createFirmwareButton(manufacturer) {
+            const button = new St.Button({
+                style_class: 'nvme-support-button',
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+            });
+            button.set_child(new St.Icon({
+                gicon: this._loadMenuIconByName(ICONS.BoxArrowUpRight),
+                icon_size: VALUE_ICON_SIZE,
+            }));
+            button.set_accessible_name(_('Firmware update available'));
+            this._attachHelperCursor(button);
+            this._attachHoverTooltip(button, _('Firmware update available'));
+            button.connect('clicked', () => {
+                const url = FIRMWARE_PAGE_URLS[manufacturer];
+                if (url)
+                    Gio.AppInfo.launch_default_for_uri(url, null);
+            });
+            return button;
+        }
+
+        _createUnknownDeviceButton({smartRaw, listRaw, lspciRaw, modelNumber, supportLevel}) {
             const button = new St.Button({
                 style_class: 'nvme-support-button',
                 can_focus: true,
@@ -1608,7 +1795,7 @@ export const Indicator = GObject.registerClass(
             this._attachHoverTooltip(button, _('Device support'));
             button.connect('clicked', () => {
                 this.menu.close();
-                this._showDeviceSupportDialog({smartRaw, listRaw, modelNumber, supportLevel});
+                this._showDeviceSupportDialog({smartRaw, listRaw, lspciRaw, modelNumber, supportLevel});
             });
             return button;
         }
@@ -1618,13 +1805,14 @@ export const Indicator = GObject.registerClass(
         // transient overlay), so a stray click does not dismiss it; it grabs
         // the pointer/keyboard until Closed or Escape.
         // -------------------------------------------------------------------
-        _showDeviceSupportDialog({smartRaw, listRaw, modelNumber, supportLevel}) {
+        _showDeviceSupportDialog({smartRaw, listRaw, lspciRaw, modelNumber, supportLevel}) {
             if (this._supportDialog) {
                 this._supportDialog.close();
             }
             const dialog = new DeviceSupportDialog({
                 smartRaw,
                 listRaw,
+                lspciRaw,
                 modelNumber,
                 supportLevel,
                 createCopyableJsonBox: (title, text, command) =>
@@ -1638,7 +1826,7 @@ export const Indicator = GObject.registerClass(
 
         // -------------------------------------------------------------------
         // A JSON text box for the support dialog: a monospace, 10-line-tall
-        // scrollable body with selectable text and a small clipboard-icon
+        // scrollable body with selectable text and a small copy-icon
         // copy button at its top right corner. `title` is the caption above
         // the text.
         // -------------------------------------------------------------------
@@ -1647,8 +1835,12 @@ export const Indicator = GObject.registerClass(
                 vertical: true,
                 style_class: 'nvme-support-json-frame',
             });
-            const header = new St.BoxLayout({ style_class: 'nvme-support-json-header' });
+            const header = new St.BoxLayout({
+                style_class: 'nvme-support-json-header',
+                x_expand: true,
+            });
             const titleLabel = title;
+            titleLabel.x_expand = true;
             header.add_child(titleLabel);
             const copyButton = new St.Button({
                 style_class: 'nvme-support-copy-button',
@@ -1657,7 +1849,7 @@ export const Indicator = GObject.registerClass(
                 track_hover: true,
             });
             copyButton.set_child(new St.Icon({
-                gicon: this._loadMenuIconByName(ICONS.Clipboard),
+                icon_name: 'edit-copy-symbolic',
                 icon_size: VALUE_ICON_SIZE,
             }));
             copyButton.set_accessible_name(_('Copy to clipboard'));

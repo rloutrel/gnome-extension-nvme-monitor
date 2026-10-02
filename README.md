@@ -56,8 +56,9 @@ top-bar menu: SMART log data, temperature, endurance and critical warnings.
 
 Vendor coverage is documented in [SUPPORTED.md](SUPPORTED.md): a list of
 supported manufacturers (Samsung, Western Digital, Micron, Crucial,
-SK Hynix, Intel) and the concrete device models tested against real
-hardware. If your drive is not recognized, the extension shows a red `!`
+SK Hynix, Intel) and the concrete known device models, with the ones
+confirmed working on real hardware marked as such. If your drive is not
+recognized, the extension shows a red `!`
 button that opens a support dialog to report it.
 
 ## Requirements
@@ -176,6 +177,7 @@ nvme-monitor@rloutrel.github.com/
   icons.js            # Bundled icon registry + Gio.FileIcon helper
   prefs.js             # Preferences window (separate GTK4/Adwaita process)
   smartParser.js       # SMART log parsing (vendor parsers), pure module
+  firmwareRegistry.js  # last-known-firmware lookup (per hardware revision), pure module
   smartStatus.js       # SMART health gauges + status line, pure module
   tempFormat.js       # Temperature line formatting, pure module
   tempTiers.js        # Temperature tier resolution (icon, style), pure module

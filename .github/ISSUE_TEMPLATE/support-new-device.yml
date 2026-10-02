@@ -33,6 +33,7 @@ body:
         ```
         nvme list -o json
         sudo nvme smart-log [device_path] -o json
+        lspci -nn | grep -i nvme
         ```
 
         **One ticket per device.** If several of your devices are
@@ -94,6 +95,16 @@ body:
     validations:
       required: true
 
+  - type: textarea
+    id: lspci-nvme
+    attributes:
+      label: "Controller PCI device ID (`lspci -nn | grep -i nvme`)"
+      description: The controller PCI device ID (e.g. `144d:a809`) identifies the exact hardware revision, which the validated-devices registry keys on. Copy it from the extension's support dialog, or run the command and report the `[vendor:device]` ID from the brackets.
+      render: text
+      placeholder: |
+        144d:a809
+    validations:
+      required: true
   - type: input
     id: nvme-cli-version
     attributes:
