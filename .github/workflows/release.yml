@@ -16,7 +16,7 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y gettext libglib2.0-dev-bin zip
+          sudo apt-get install -y gettext libglib2.0-dev-bin libxml2-utils zip
 
       - name: Validate metadata
         run: node "nvme-monitor@rloutrel.github.com/test/validateMetadata.js"
