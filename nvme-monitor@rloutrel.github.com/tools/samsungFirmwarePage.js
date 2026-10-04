@@ -17,8 +17,15 @@
 // The page titles its download blocks like "NVMe SSD-970 EVO Plus
 // Firmware" or "NVMe SSD-990 PRO Series Firmware"; the suffix is
 // dropped before the alias lookup.
-const FIRMWARE_SUFFIX_RE = /[ \t]*Firmware[ \t]*$/;
-const SERIES_SUFFIX_RE = /[ \t]+Series$/;
+function stripSuffix(value, suffix) {
+    if (!value.endsWith(suffix))
+        return value;
+    return value.slice(0, -suffix.length).replace(/[ \t]+$/, '');
+}
+
+function stripTitleSuffixes(title) {
+    return stripSuffix(stripSuffix(title, ' Firmware'), ' Series');
+}
 
 export const SAMSUNG_TOOLS_URL =
     'https://semiconductor.samsung.com/consumer-storage/support/tools/';
@@ -68,10 +75,7 @@ export function parseSamsungFirmwareEntries(html) {
         const titleMatch = blocks[i].match(/<p>([^<]+)<\/p>/);
         if (!titleMatch)
             continue;
-        const pageTitle = titleMatch[1]
-            .trim()
-            .replace(FIRMWARE_SUFFIX_RE, '')
-            .replace(SERIES_SUFFIX_RE, '');
+        const pageTitle = stripTitleSuffixes(titleMatch[1].trim());
         if (!SAMSUNG_MODEL_ALIASES[pageTitle])
             continue;
         const versionMatch = blocks[i].match(

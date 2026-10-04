@@ -114,20 +114,20 @@ function readPciDeviceIdAsync(devicePath) {
     if (_pciDeviceIdCache.has(name))
         return _pciDeviceIdCache.get(name);
     const pending = new Promise((resolve) => {
-        Promise.all([readSysfsValueAsync(devicePath, 'vendor'), readSysfsValueAsync(devicePath, 'device')])
+        const readId = Promise.all([readSysfsValueAsync(devicePath, 'vendor'), readSysfsValueAsync(devicePath, 'device')])
             .then(([vendor, device]) => {
                 if (vendor === '' || device === '')
                     return '';
                 return `0x${Number.parseInt(device, 16).toString(16)}`;
             })
-            .catch((e) => {
-                _warn(`Failed to read PCI device ID for ${name}: ${e}`);
-                return '';
-            })
             .then((id) => {
                 _pciDeviceIdCache.set(name, Promise.resolve(id));
                 resolve(id);
             });
+        readId.catch((e) => {
+            _warn(`Failed to read PCI device ID for ${name}: ${e}`);
+            resolve('');
+        });
     });
     _pciDeviceIdCache.set(name, pending);
     return pending;
