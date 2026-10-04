@@ -12,7 +12,7 @@ import {
     preparePastedSetupScript,
     setupScriptErrorMessage,
     checkSetupScriptHash,
-} from '../v2script.js';
+} from '../nvme-monitor@rloutrel.github.com/v2script.js';
 
 const SHEBANG = '#!/bin/bash\n';
 

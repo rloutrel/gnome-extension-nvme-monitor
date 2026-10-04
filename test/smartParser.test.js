@@ -11,8 +11,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSmart, getParser, detectManufacturer, getSupportLevel, SUPPORTED_MANUFACTURERS } from '../smartParser.js';
-import VALIDATED_DEVICES from '../validatedDevices.json' with {type: 'json'};
+import { parseSmart, getParser, detectManufacturer, getSupportLevel, SUPPORTED_MANUFACTURERS } from '../nvme-monitor@rloutrel.github.com/smartParser.js';
+import VALIDATED_DEVICES from '../nvme-monitor@rloutrel.github.com/validatedDevices.json' with {type: 'json'};
 
 // ---------------------------------------------------------------------------
 // Fixture: Samsung SSD 980 500GB

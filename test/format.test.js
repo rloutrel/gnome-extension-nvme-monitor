@@ -14,7 +14,7 @@ import {
     formatPowerOnHours,
     spareGaugeColor,
     usedGaugeColor,
-} from '../format.js';
+} from '../nvme-monitor@rloutrel.github.com/format.js';
 
 // ---------------------------------------------------------------------------
 // formatCompactNumber
@@ -140,7 +140,7 @@ test('usedGaugeColor: red at 85% and above', () => {
 // ---------------------------------------------------------------------------
 // tempTierColor
 // ---------------------------------------------------------------------------
-import { tempTierColor } from '../format.js';
+import { tempTierColor } from '../nvme-monitor@rloutrel.github.com/format.js';
 
 const COLOR_TRACK = [0.2, 0.2, 0.2];
 
@@ -177,7 +177,7 @@ test('tempTierColor: track color for null/undefined temperature', () => {
 // ---------------------------------------------------------------------------
 // formatDurationMs
 // ---------------------------------------------------------------------------
-import { formatDurationMs } from '../format.js';
+import { formatDurationMs } from '../nvme-monitor@rloutrel.github.com/format.js';
 
 test('formatDurationMs: zero and negative give 0s', () => {
     assert.equal(formatDurationMs(0), '0s');

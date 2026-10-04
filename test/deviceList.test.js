@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeDeviceList } from '../deviceList.js';
+import { normalizeDeviceList } from '../nvme-monitor@rloutrel.github.com/deviceList.js';
 
 // ---------------------------------------------------------------------------
 // Fixture: flat layout (pre-2.11, 2.13–2.x)

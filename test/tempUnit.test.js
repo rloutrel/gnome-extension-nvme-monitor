@@ -9,7 +9,7 @@ import {
     tempSuffix,
     isValidUnit,
     detectTemperatureUnit,
-} from '../tempUnit.js';
+} from '../nvme-monitor@rloutrel.github.com/tempUnit.js';
 
 // ---------------------------------------------------------------------------
 // Constants

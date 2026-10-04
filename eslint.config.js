@@ -149,7 +149,7 @@ export default [
         },
     },
     {
-        files: ['nvme-monitor@rloutrel.github.com/test/**/*.js'],
+        files: ['test/**/*.js'],
         languageOptions: {
             globals: {
                 URL: 'readonly',
@@ -160,7 +160,7 @@ export default [
     },
     {
         // Node CLI tools (firmware-page scraper), not GNOME Shell code.
-        files: ['nvme-monitor@rloutrel.github.com/tools/**/*.mjs'],
+        files: ['tools/**/*.mjs'],
         languageOptions: {
             globals: {
                 process: 'readonly',

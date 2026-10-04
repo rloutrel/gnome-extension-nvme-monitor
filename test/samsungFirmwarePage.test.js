@@ -15,7 +15,7 @@ import {
     buildUpdatePlan,
     SAMSUNG_MODEL_ALIASES,
 } from '../tools/samsungFirmwarePage.js';
-import VALIDATED_DEVICES from '../validatedDevices.json' with {type: 'json'};
+import VALIDATED_DEVICES from '../nvme-monitor@rloutrel.github.com/validatedDevices.json' with {type: 'json'};
 
 // Mirrors the download-list block structure of
 // semiconductor.samsung.com/consumer-storage/support/tools/.

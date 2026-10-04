@@ -10,7 +10,7 @@ import {
     isCurrentUserInSmartGroup,
     runPkexecSync,
     uninstallV2Stack,
-} from '../polkitManager.js';
+} from '../nvme-monitor@rloutrel.github.com/polkitManager.js';
 
 // ---------------------------------------------------------------------------
 // Constants

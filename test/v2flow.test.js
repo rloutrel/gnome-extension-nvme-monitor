@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
     KILL_THRESHOLD,
     handleUninstallNotFound,
-} from '../v2decisions.js';
+} from '../nvme-monitor@rloutrel.github.com/v2decisions.js';
 
 test('KILL_THRESHOLD is 4', () => {
     assert.equal(KILL_THRESHOLD, 4);

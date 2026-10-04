@@ -18,7 +18,7 @@ import {
     FLAT_FORMAT_RESTORED,
     NESTED_FORMAT_REINTRODUCED,
     BYTES_OVERFLOW_FIXED,
-} from '../versionUtils.js';
+} from '../nvme-monitor@rloutrel.github.com/versionUtils.js';
 
 // ---------------------------------------------------------------------------
 // parseNvmeVersion

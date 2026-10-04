@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
     buildHealthGauges,
     getSmartStatusLine,
-} from '../smartStatus.js';
+} from '../nvme-monitor@rloutrel.github.com/smartStatus.js';
 
 const SMART_WITH_HEALTH = {
     health: {

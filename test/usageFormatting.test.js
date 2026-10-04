@@ -5,7 +5,7 @@ import {
     formatDiskUsageBytes,
     describeDiskUsageEntry,
     buildDiskUsageDetails,
-} from '../usageFormatting.js';
+} from '../nvme-monitor@rloutrel.github.com/usageFormatting.js';
 
 test('formatDiskUsageBytes formats plain bytes', () => {
     assert.equal(formatDiskUsageBytes(1), '1.0 KiB');

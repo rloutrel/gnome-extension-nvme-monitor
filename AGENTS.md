@@ -20,6 +20,12 @@ endurance) in the top-bar menu. Targets **GNOME Shell 50/51** (ESM imports
 setup-polkit.sh       # Installs the polkit + wrapper stack (run as root).
                       #   Lives at the repository root, NOT in the extension
                       #   dir (never executed from the local extension dir).
+tools/                # Node CLI tools at the repository root: Samsung
+                      #   firmware-page scraper that refreshes
+                      #   validatedDevices.json (dry run by default;
+                      #   multi-revision models always go to manual review).
+test/                 # Unit tests (Node built-in runner), repo root.
+po/                   # Translation sources (gettext), repo root.
 nvme-monitor@rloutrel.github.com/
   extension.js         # GNOME Shell entry point: enable/disable lifecycle only.
   indicator.js         # Panel indicator: menu, device rendering, polling,
@@ -50,11 +56,7 @@ nvme-monitor@rloutrel.github.com/
   stylesheet.css        # Theme-aware styles (no hardcoded colors).
   metadata.json         # Shell version, UUID, version.
   icons/bootstrap/      # Bundled SVG icons (Bootstrap Icons, MIT).
-  test/                 # Unit tests (Node built-in runner).
-  tools/                # Node CLI tools: Samsung firmware-page scraper
-                       #   that refreshes validatedDevices.json (dry run
-                       #   by default; multi-revision models always go
-                       #   to manual review).
+
 ```
 
 ### Pure vs GJS modules
@@ -203,9 +205,12 @@ auto-initializes the domain named in `metadata.json` (`gettext-domain`).
   update the `.po` files. With gettext installed:
 
   ```bash
-  cd nvme-monitor@rloutrel.github.com
-  xgettext --from-code=UTF-8 --output=po/nvme-monitor@rloutrel.github.com.pot \
-      --files-from=po/POTFILES --keyword=_ --keyword=N_
+  cd po
+  xgettext --from-code=UTF-8 --output=nvme-monitor@rloutrel.github.com.pot \
+      --files-from=POTFILES --keyword=_ --keyword=N_ \
+      ../nvme-monitor@rloutrel.github.com/extension.js \
+      ../nvme-monitor@rloutrel.github.com/tempFormat.js \
+      ../nvme-monitor@rloutrel.github.com/prefs.js
   ```
 
   (No `xgettext` in the dev environment — edit the `.pot`/`.po` by hand
@@ -232,12 +237,12 @@ VALIDATION_DOCKER_IMAGE=node:22-bookworm \
 
 ```bash
 node --test \
-  "nvme-monitor@rloutrel.github.com/test/tempFormat.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/smartParser.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/versionUtils.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/deviceList.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/format.test.js" \
-  "nvme-monitor@rloutrel.github.com/test/tempHistory.test.js"
+  "test/tempFormat.test.js" \
+  "test/smartParser.test.js" \
+  "test/versionUtils.test.js" \
+  "test/deviceList.test.js" \
+  "test/format.test.js" \
+  "test/tempHistory.test.js"
 ```
 
 - Use `node:test` + `node:assert/strict`.

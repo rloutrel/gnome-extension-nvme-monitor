@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TempHistory, TEMP_HISTORY_WINDOW_MS, computeTimeAboveThresholds, crossedThresholds } from '../tempHistory.js';
+import { TempHistory, TEMP_HISTORY_WINDOW_MS, computeTimeAboveThresholds, crossedThresholds } from '../nvme-monitor@rloutrel.github.com/tempHistory.js';
 
 // ---------------------------------------------------------------------------
 // add / get / latest

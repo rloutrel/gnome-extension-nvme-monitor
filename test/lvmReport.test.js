@@ -5,7 +5,7 @@ import {
     parsePvReport,
     filterUsablePhysicalVolumes,
     parseLvReport,
-} from '../lvmReport.js';
+} from '../nvme-monitor@rloutrel.github.com/lvmReport.js';
 
 const PVS_STDOUT = JSON.stringify({report: [{pv: [
     {pv_name: '/dev/nvme0n1p3', vg_name: 'vg0', pv_size: '1024', pv_free: '512'},
