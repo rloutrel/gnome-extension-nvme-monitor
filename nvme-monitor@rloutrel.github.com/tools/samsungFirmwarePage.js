@@ -17,8 +17,8 @@
 // The page titles its download blocks like "NVMe SSD-970 EVO Plus
 // Firmware" or "NVMe SSD-990 PRO Series Firmware"; the suffix is
 // dropped before the alias lookup.
-const FIRMWARE_SUFFIX_RE = /\s*Firmware\s*$/;
-const SERIES_SUFFIX_RE = /\s+Series$/;
+const FIRMWARE_SUFFIX_RE = /[ \t]*Firmware[ \t]*$/;
+const SERIES_SUFFIX_RE = /[ \t]+Series$/;
 
 export const SAMSUNG_TOOLS_URL =
     'https://semiconductor.samsung.com/consumer-storage/support/tools/';

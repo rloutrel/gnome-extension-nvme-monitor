@@ -73,7 +73,7 @@ function loadValidatedDevices() {
             }
         });
 }
-loadValidatedDevices();
+void loadValidatedDevices();
 
 // ---------------------------------------------------------------------------
 // Controller PCI device ID for a device path (e.g. '/dev/nvme0' ->
@@ -900,7 +900,7 @@ export const Indicator = GObject.registerClass(
             this._pollingTimer = null;
             this.menu.connect('open-state-changed', (menu, open) => {
                 if (open)
-                    this._refreshDevices();
+                    void this._refreshDevices();
             });
         }
 
@@ -932,7 +932,7 @@ export const Indicator = GObject.registerClass(
         _startPolling() {
             if (this._pollingTimer) return;
             this._pollingTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, POLL_INTERVAL_S, () => {
-                this._refreshDevices();
+                void this._refreshDevices();
                 return GLib.SOURCE_CONTINUE;
             });
             _debug(`Polling timer started (${POLL_INTERVAL_S}s interval)`);
@@ -1502,7 +1502,7 @@ export const Indicator = GObject.registerClass(
             } else {
                 // Menu rebuilt since the timer started; do a full refresh to
                 // re-create the chart and reconcile timers.
-                this._refreshDevices();
+                void this._refreshDevices();
             }
         }
 
@@ -2632,11 +2632,11 @@ export const Indicator = GObject.registerClass(
                 },
                 onInstalled: () => {
                     this._startPolling();
-                    this._refreshDevices();
+                    void this._refreshDevices();
                 },
                 onUninstalled: () => {
                     this._stopPolling();
-                    this._refreshDevices();
+                    void this._refreshDevices();
                 },
             };
         }
