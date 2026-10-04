@@ -12,7 +12,7 @@ import {
     formatTempCelsius,
     formatTemperatureLine,
     formatSensorRows,
-} from '../tempFormat.js';
+} from '../nvme-monitor@rloutrel.github.com/tempFormat.js';
 
 // ---------------------------------------------------------------------------
 // formatTempCelsius

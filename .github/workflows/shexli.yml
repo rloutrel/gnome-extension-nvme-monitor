@@ -16,7 +16,3 @@ jobs:
         uses: 3v1n0/shexli-ci@c31b5dc22ae7acd684e5ec9ee6728f39ac2e1eac # v1
         with:
           path: nvme-monitor@rloutrel.github.com
-          exclude: |
-            test/*
-            tools/*
-            po/*

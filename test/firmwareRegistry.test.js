@@ -14,8 +14,8 @@ import {
     getRevisionSupportLevel,
     getLatestFirmware,
     assessFirmware,
-} from '../firmwareRegistry.js';
-import VALIDATED_DEVICES from '../validatedDevices.json' with {type: 'json'};
+} from '../nvme-monitor@rloutrel.github.com/firmwareRegistry.js';
+import VALIDATED_DEVICES from '../nvme-monitor@rloutrel.github.com/validatedDevices.json' with {type: 'json'};
 
 test('normalizePciDeviceId accepts the common textual forms', () => {
     assert.equal(normalizePciDeviceId('a808'), '0xa808');

@@ -11,8 +11,8 @@
  * routed to manual review and never auto-filled, because Samsung's
  * page publishes a single version per model name.
  *
- * Run from the extension directory:
- *   node --test test/samsungFirmwarePage.test.js   # parsing tests
+ * Run from the repository root:
+ *   node --test "test/samsungFirmwarePage.test.js"  # parsing tests
  *   node tools/updateSamsungFirmware.mjs            # dry run
  */
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -25,7 +25,8 @@ import {
 } from './samsungFirmwarePage.js';
 
 const toolsDir = dirname(fileURLToPath(import.meta.url));
-const registryPath = join(toolsDir, '..', 'validatedDevices.json');
+const registryPath = join(toolsDir, '..', 'nvme-monitor@rloutrel.github.com',
+    'validatedDevices.json');
 const write = process.argv.includes('--write');
 
 async function fetchPage() {

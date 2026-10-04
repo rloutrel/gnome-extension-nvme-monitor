@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {computeOverlayPosition} from '../overlayGeometry.js';
+import {computeOverlayPosition} from '../nvme-monitor@rloutrel.github.com/overlayGeometry.js';
 
 const MONITOR = {x: 0, y: 0, width: 1920, height: 1080};
 

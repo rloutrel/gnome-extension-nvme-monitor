@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {buildDiskUsageEntries, isSourceOnDisk, parseFilesystemUsage} from '../diskUsageModel.js';
+import {buildDiskUsageEntries, isSourceOnDisk, parseFilesystemUsage} from '../nvme-monitor@rloutrel.github.com/diskUsageModel.js';
 
 test('disk model: parses mounted filesystem usage', () => {
     const entries = parseFilesystemUsage([

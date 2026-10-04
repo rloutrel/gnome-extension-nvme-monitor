@@ -201,8 +201,10 @@ nvme-monitor@rloutrel.github.com/
   metadata.json        # Shell version, UUID, version
   schemas/             # GSettings schema
   icons/bootstrap/     # Bundled SVG icons (Bootstrap Icons, MIT)
-  po/                  # Translations (gettext)
-  test/                # Unit tests (Node built-in runner)
+
+tools/                 # Samsung firmware-page scraper (dev tool)
+test/                  # Unit tests (Node built-in runner)
+po/                    # Translation sources (gettext)
 screenshots/           # Screenshots referenced by this README
 ```
 
@@ -216,7 +218,7 @@ are unit-tested with Node's built-in test runner — no test framework, no
 dependencies:
 
 ```bash
-node --test "nvme-monitor@rloutrel.github.com/test/"*.test.js
+node --test "test/"*.test.js
 ```
 
 `extension.js` and `indicator.js` run inside GNOME Shell (GJS) and cannot be unit-tested

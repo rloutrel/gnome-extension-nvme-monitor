@@ -12,7 +12,7 @@ import {
     getTempStyle,
     isCriticalTemp,
     hasHotTemperatureSensor,
-} from '../tempTiers.js';
+} from '../nvme-monitor@rloutrel.github.com/tempTiers.js';
 
 test('threshold constants keep their values', () => {
     assert.equal(TEMP_WARM_C, 50);
