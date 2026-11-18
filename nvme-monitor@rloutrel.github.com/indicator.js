@@ -429,12 +429,12 @@ export const SetupScriptDialog = GObject.registerClass(
             // hiding the overflow from the scroll adjustment.
             why.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
             whyCaveat.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
-            const whyPage = new St.BoxLayout({vertical: true});
+            const whyPage = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL});
             whyPage.add_child(why);
             whyPage.add_child(whyCaveat);
 
             const faqBox = new St.BoxLayout({
-                vertical: true,
+                orientation: Clutter.Orientation.VERTICAL,
                 style_class: 'nvme-setup-faq-box',
             });
             const faqEntries = [
@@ -523,7 +523,7 @@ export const SetupScriptDialog = GObject.registerClass(
                 hscrollbar_policy: St.PolicyType.NEVER,
                 vscrollbar_policy: St.PolicyType.ALWAYS,
             });
-            const infoContent = new St.BoxLayout({vertical: true});
+            const infoContent = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL});
             infoContent.add_child(whyPage);
             infoContent.add_child(faqBox);
             infoScroll.set_child(infoContent);
@@ -650,7 +650,7 @@ export const SetupScriptDialog = GObject.registerClass(
             // Only the code area scrolls: the header stays fixed above it,
             // so the scrollbar applies to the script text alone.
             const codeContent = new St.BoxLayout({
-                vertical: true,
+                orientation: Clutter.Orientation.VERTICAL,
                 style_class: 'nvme-support-json-content',
             });
             codeContent.add_child(scriptText);
@@ -664,7 +664,7 @@ export const SetupScriptDialog = GObject.registerClass(
             scrollView.set_child(codeContent);
 
             const frame = new St.BoxLayout({
-                vertical: true,
+                orientation: Clutter.Orientation.VERTICAL,
                 style_class: 'nvme-support-json-frame',
             });
             frame.add_child(scriptHeader);
@@ -1573,7 +1573,7 @@ export const Indicator = GObject.registerClass(
             const gaugeList = gauges || [];
             const content = new St.BoxLayout({ x_expand: true, style_class: 'nvme-meta-columns' });
             const leftColumn = new St.BoxLayout({
-                vertical: true,
+                orientation: Clutter.Orientation.VERTICAL,
                 x_expand: true,
                 style_class: 'nvme-meta-stack',
             });
@@ -1594,7 +1594,7 @@ export const Indicator = GObject.registerClass(
             content.add_child(leftColumn);
 
             const rightColumn = new St.BoxLayout({
-                vertical: true,
+                orientation: Clutter.Orientation.VERTICAL,
                 x_expand: false,
                 x_align: Clutter.ActorAlign.END,
                 style_class: 'nvme-gauge-stack',
@@ -1619,7 +1619,7 @@ export const Indicator = GObject.registerClass(
 
             const item = new PopupBaseMenuItem({ reactive: false, can_focus: false });
             const right = new St.BoxLayout({
-                vertical: true,
+                orientation: Clutter.Orientation.VERTICAL,
                 x_expand: true,
                 x_align: Clutter.ActorAlign.END,
                 style_class: 'nvme-gauge-stack nvme-gauge-below-chart',
@@ -1874,7 +1874,7 @@ export const Indicator = GObject.registerClass(
         // -------------------------------------------------------------------
         _createCopyableJsonBox(title, jsonText, command = null) {
             const frame = new St.BoxLayout({
-                vertical: true,
+                orientation: Clutter.Orientation.VERTICAL,
                 style_class: 'nvme-support-json-frame',
             });
             const header = new St.BoxLayout({
@@ -1943,7 +1943,7 @@ export const Indicator = GObject.registerClass(
             // one, so wrap the label in a vertical St.BoxLayout (the same
             // pattern GNOME Shell uses for its own scroll views).
             const content = new St.BoxLayout({
-                vertical: true,
+                orientation: Clutter.Orientation.VERTICAL,
                 style_class: 'nvme-support-json-content',
             });
             content.add_child(bodyLabel);
@@ -2215,7 +2215,7 @@ export const Indicator = GObject.registerClass(
             this._hideExplanationOverlay();
 
             const box = new St.BoxLayout({
-                vertical: true,
+                orientation: Clutter.Orientation.VERTICAL,
                 style_class: 'nvme-explain-overlay',
                 x_expand: false,
             });
