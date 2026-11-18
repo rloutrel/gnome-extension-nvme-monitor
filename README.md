@@ -90,8 +90,7 @@ Install `nvme-cli` from your distribution:
        ~/.local/share/gnome-shell/extensions/
    ```
 
-3. Restart GNOME Shell (`Alt+F2` → `r` → `Enter` on X11, or log out and back
-   in on Wayland).
+3. Restart GNOME Shell by logging out and back in (Wayland only).
 4. Enable the extension:
 
    ```bash
